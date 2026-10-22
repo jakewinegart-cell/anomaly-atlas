@@ -66,12 +66,42 @@ function dToOrd(d) { if (!d) return null; const y = Math.floor(d / 10000), m = M
 function fmtDate(s) { if (!s) return "Date unknown"; const [y, m, d] = String(s).split("-"); if (!m) return y; const mo = new Date(Date.UTC(+y, +m - 1, 1)).toLocaleString("en-US", { month: "short", timeZone: "UTC" }); return d ? `${mo} ${+d}, ${y}` : `${mo} ${y}`; }
 function hav(a, b, c, d) { const p = Math.PI / 180, x = Math.sin((c - a) * p / 2) ** 2 + Math.cos(a * p) * Math.cos(c * p) * Math.sin((d - b) * p / 2) ** 2; return 12742 * Math.asin(Math.sqrt(x)); }
 async function getJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(u + " " + r.status); return r.json(); }
+/* ---- Back-button support: every user-opened panel pushes a history entry; Back closes the topmost one.
+   UI closes (X, swipe, backdrop, Esc) close immediately and then pop their own entry silently. ---- */
+const NAV = { stack: [], silent: 0, queue: [] };
+function navRun(fn) { if (NAV.silent > 0) NAV.queue.push(fn); else fn(); }
+function navPush(key, hash, close, opts = {}) {
+  navRun(() => {
+    const top = NAV.stack[NAV.stack.length - 1];
+    const replace = top && (top.key === key || (opts.replaceKeys || []).includes(top.key));
+    if (replace) { NAV.stack[NAV.stack.length - 1] = { key, close, data: opts.data }; history.replaceState({ atlas: NAV.stack.length }, "", hash); }
+    else { NAV.stack.push({ key, close, data: opts.data }); history.pushState({ atlas: NAV.stack.length }, "", hash); }
+  });
+}
+function navDrop(keys) {   // the panel was already closed by the UI: pop its own entries without closing anything again
+  keys = [].concat(keys); let k = 0;
+  while (NAV.stack.length && keys.includes(NAV.stack[NAV.stack.length - 1].key)) { NAV.stack.pop(); k++; }
+  if (k) { NAV.silent += k; history.go(-k); }
+}
+function navTop() { return NAV.stack[NAV.stack.length - 1]; }
+window.addEventListener("popstate", () => {
+  if (NAV.silent > 0) { NAV.silent--; if (!NAV.silent) { const q = NAV.queue.splice(0); q.forEach(f => f()); } return; }
+  const top = NAV.stack.pop(); if (top) { try { top.close(); } catch (e) { console.warn(e); } }   // camera is left where it is
+});
+const DETAIL_KEYS = ["event", "list"];
+function shareURL(id) { return location.origin + location.pathname + location.search + "#event=" + encodeURIComponent(id); }
 function openSheet(id, state) {
   const el = $("#" + id); el.dataset.state = state || (isPhone() ? "half" : "open");
   if (id === "filters") document.body.classList.add("filters-open");
   if (isPhone()) { const other = id === "filters" ? "detail" : "filters"; $("#" + other).dataset.state = "closed"; }
 }
-function closeSheet(id) { $("#" + id).dataset.state = "closed"; if (id === "filters") document.body.classList.remove("filters-open"); if (id === "detail") clearSelection(); }
+function closeSheetRaw(id) { $("#" + id).dataset.state = "closed"; if (id === "filters") document.body.classList.remove("filters-open"); if (id === "detail") { clearSelection(); unspiderfy && map && unspiderfy(); } }
+function closeSheet(id) { closeSheetRaw(id); navDrop(id === "detail" ? DETAIL_KEYS : [id]); }
+function openFilters() {
+  openSheet("filters");
+  // on phones the two sheets are exclusive, so the filters entry replaces a detail entry rather than stacking on it
+  navPush("filters", "#filters", () => closeSheetRaw("filters"), { replaceKeys: isPhone() ? DETAIL_KEYS : [] });
+}
 
 /* ------------------------------------------------------------ map */
 let map;
@@ -156,11 +186,92 @@ async function loadCityCells() {
   const got = await Promise.all(want.map(k => getJSON(`data/cities/c/${k}.json${V}`).catch(() => null)));
   for (const c of got) if (c) addCities(c);
 }
+/* ---- stacks: events at the same (or nearly the same) spot, e.g. city-centre geocodes ---- */
+const STACK_M = 110, STACK_CELL = 0.001;
+const PREC = { c: "Location approximate (city center)", s: "Location approximate (state level)", n: "Location approximate (country level)" };
+function precNote(q) { return PREC[q] || ""; }
+function groupStacks(feats) {
+  const buckets = new Map();
+  for (const f of feats) {
+    const [x, y] = f.geometry.coordinates, bx = Math.round(x / STACK_CELL), by = Math.round(y / STACK_CELL), k = bx + ":" + by;
+    let b = buckets.get(k); if (!b) buckets.set(k, b = { bx, by, x, y, m: [] }); b.m.push(f);
+  }
+  const order = [...buckets.values()].sort((a, b) => b.m.length - a.m.length), out = [], stacks = new Map();
+  for (const b of order) {
+    if (b.done) continue; b.done = true; let members = b.m;
+    const kx = 111320 * Math.cos(b.y * Math.PI / 180);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      if (!dx && !dy) continue; const n = buckets.get((b.bx + dx) + ":" + (b.by + dy));
+      if (!n || n.done) continue;
+      if (Math.hypot((n.x - b.x) * kx, (n.y - b.y) * 110540) <= STACK_M) { n.done = true; members = members.concat(n.m); }
+    }
+    if (members.length === 1) { out.push(members[0]); continue; }
+    const id = "stk:" + stacks.size, props = { i: id, g: members.length, c: 0 }, cnt = TYPES.map(() => 0);
+    for (const f of members) { cnt[f.properties.t]++; if (f.properties.c) props.c = 1; }
+    cnt.forEach((v, i) => props["g" + i] = v); props.t = cnt.indexOf(Math.max(...cnt));
+    members.sort((a, b) => (b.properties.c || 0) - (a.properties.c || 0) || b.properties.s - a.properties.s || (b.properties.d || 0) - (a.properties.d || 0));
+    stacks.set(id, { id, members, coords: [b.x, b.y] });
+    out.push({ type: "Feature", geometry: { type: "Point", coordinates: [b.x, b.y] }, properties: props });
+  }
+  st.stacks = stacks; return out;
+}
+function stackEl(p) {
+  const counts = TYPES.map((t, i) => p["g" + i] || 0);
+  const el = donutEl({ point_count: p.g, point_count_abbreviated: abbr(p.g), ...Object.fromEntries(counts.map((v, i) => ["c" + i, v])) }, true);
+  el.classList.add("stack"); el.dataset.stack = p.i; return el;
+}
+function abbr(n) { return n >= 10000 ? Math.round(n / 1000) + "k" : n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n); }
+function openStack(id) {
+  const sk = st.stacks && st.stacks.get(id); if (!sk) return;
+  if (sk.members.length <= 8) spiderfy(sk); else renderStackList(sk);
+}
+function spiderfy(sk) {
+  unspiderfy(); st.spider = sk.id;
+  const c = map.project(sk.coords), n = sk.members.length, R = 46 + n * 4, feats = [];
+  sk.members.forEach((f, k) => {
+    const a = -Math.PI / 2 + k * 2 * Math.PI / n, ll = map.unproject([c.x + R * Math.cos(a), c.y + R * Math.sin(a)]).toArray();
+    feats.push({ type: "Feature", geometry: { type: "LineString", coordinates: [sk.coords, ll] }, properties: { leg: 1 } });
+    feats.push({ type: "Feature", geometry: { type: "Point", coordinates: ll }, properties: { ...f.properties } });
+  });
+  map.getSource("spider").setData({ type: "FeatureCollection", features: feats });
+  const el = document.querySelector(`.donut[data-stack="${sk.id}"]`); if (el) el.classList.add("open");
+}
+function unspiderfy() {
+  if (!st.spider || !map.getSource("spider")) return; st.spider = null;
+  map.getSource("spider").setData({ type: "FeatureCollection", features: [] });
+  document.querySelectorAll(".donut.open").forEach(e => e.classList.remove("open"));
+}
+async function previewLine(f) {
+  try { const r = await getDetail(f.properties.i); if (!r) return null; const t = (r.summary || "").replace(/\s+/g, " ");
+    return { text: t.length > 150 ? t.slice(0, 150).replace(/\s\S*$/, "") + "…" : t, date: r.date, time: r.time }; } catch (e) { return null; }
+}
+function renderStackList(sk, opts = {}) {
+  unspiderfy(); clearSelection();
+  const qs = new Set(sk.members.map(f => f.properties.q || "")), q = qs.size === 1 ? [...qs][0] : "";
+  $("#detail-kicker").innerHTML = `<span class="badge stackb">${sk.members.length} events at this spot</span>`;
+  $("#detail-body").innerHTML = `<h2 class="d-title">${sk.members.length} events at this location</h2>
+   ${q ? `<div class="approx">⚠️ ${precNote(q)}: these reports were geocoded to the same point, so they're grouped here.</div>` : ""}
+   <p class="hint">Showing events that match your current filters, best-scored first. Tap one to open it.</p>
+   <ul class="stack-list">${sk.members.map(f => { const p = f.properties, t = TYPES[p.t]; return `<li><button type="button" data-id="${esc(p.i)}">
+     <span class="sl-ic">${shapeSVG(t, 16)}</span><span class="sl-main"><span class="sl-t">${esc(p.n)}</span>
+     <span class="sl-m">${esc(t.label)} · <span data-date="${esc(p.i)}">${esc(fmtDate(p.d ? String(p.d).slice(0, 4) + "-" + String(p.d).slice(4, 6) : null))}</span>${p.q ? " · " + esc(precNote(p.q).replace("Location approximate", "approx.")) : ""}</span>
+     <span class="sl-p" data-prev="${esc(p.i)}"></span></span><span class="sl-s ${t.id === "mass" ? "uq" : ""}">${p.s}</span></button></li>`; }).join("")}</ul>`;
+  $("#detail-body").scrollTop = 0; openSheet("detail");
+  if (!opts.noNav) navPush("list", "#list", () => closeSheetRaw("detail"), { data: sk, replaceKeys: ["event"].concat(isPhone() ? ["filters"] : []) });
+  $("#detail-body").querySelector(".stack-list").onclick = e => { const b = e.target.closest("button[data-id]"); if (b) selectEvent(b.dataset.id); };
+  // one-line previews, fetched lazily (detail chunks are cached)
+  sk.members.slice(0, 80).forEach(async f => {
+    const r = await previewLine(f), id = CSS.escape(f.properties.i); if (!r) return;
+    const el = document.querySelector(`[data-prev="${id}"]`), de = document.querySelector(`[data-date="${id}"]`);
+    if (el) el.textContent = r.text; if (de) de.textContent = fmtDate(r.date) + (r.time ? " " + r.time : "");
+  });
+}
 /* ---- cluster donuts: proportional ring of type colours around the count (HTML markers, pointer-events off) ---- */
 const DONUT_R = (matchMedia("(max-width: 820px)").matches ? [12, 14, 17, 21, 25] : [15, 18, 22, 27, 33]);
 let donutCache = {}, donutsOn = {};
 function clearDonuts() { for (const m of Object.values(donutsOn)) m.remove(); donutCache = {}; donutsOn = {}; }
-function donutEl(p) {
+function donutEl(p, isStack) {
+  if (p.n) { p = { ...p, point_count: p.n, point_count_abbreviated: abbr(p.n) }; }
   const n = p.point_count, r = n < 10 ? DONUT_R[0] : n < 100 ? DONUT_R[1] : n < 1000 ? DONUT_R[2] : n < 10000 ? DONUT_R[3] : DONUT_R[4];
   const w = Math.max(5, Math.round(r * 0.36)), r0 = r - w, sz = r * 2 + 8, cx = sz / 2;
   const counts = TYPES.map((t, i) => p["c" + i] || 0), tot = counts.reduce((a, b) => a + b, 0) || 1;
@@ -173,6 +284,7 @@ function donutEl(p) {
     segs += `<path d="M${x0} ${y0}A${r} ${r} 0 ${lg} 1 ${x1} ${y1}L${x2} ${y2}A${r0} ${r0} 0 ${lg} 0 ${x3} ${y3}Z" fill="${TYPES[i].color}"/>`;
   });
   const el = document.createElement("div"); el.className = "donut";
+  if (isStack) segs += `<circle cx="${cx}" cy="${cx}" r="${r + 3.5}" fill="none" stroke="#fff" stroke-width="1.6" stroke-dasharray="3 2.4"/>`;
   el.title = TYPES.map((t, i) => counts[i] ? `${t.label}: ${counts[i]}` : "").filter(Boolean).join("\n");
   el.innerHTML = `<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}"><circle cx="${cx}" cy="${cx}" r="${r + 1.5}" fill="#0a0c18" opacity="0.85"/>${segs}<circle cx="${cx}" cy="${cx}" r="${r0 - 0.5}" fill="rgba(10,12,28,0.9)"/><text x="${cx}" y="${cx}" dy="0.36em" text-anchor="middle" font-size="${r < 20 ? 11 : 12.5}" font-weight="700" fill="#fff">${p.point_count_abbreviated}</text></svg>`;
   return el;
@@ -181,10 +293,10 @@ function updateDonuts() {
   if (!map || !map.getSource("events") || !map.isSourceLoaded("events")) return;
   const next = {};
   for (const f of map.querySourceFeatures("events")) {
-    const p = f.properties; if (!p.cluster) continue;
-    const id = p.cluster_id; if (next[id]) continue;
+    const p = f.properties; if (!p.cluster && !p.g) continue;
+    const id = p.cluster ? "c" + p.cluster_id : "s" + p.i; if (next[id]) continue;
     let m = donutCache[id];
-    if (!m) m = donutCache[id] = new maplibregl.Marker({ element: donutEl(p), opacityWhenCovered: "0" }).setLngLat(f.geometry.coordinates);
+    if (!m) m = donutCache[id] = new maplibregl.Marker({ element: p.cluster ? donutEl(p) : stackEl(p), opacityWhenCovered: "0" }).setLngLat(f.geometry.coordinates);
     next[id] = m; if (!donutsOn[id]) m.addTo(map);
   }
   for (const id in donutsOn) if (!next[id]) donutsOn[id].remove();
@@ -208,8 +320,9 @@ function dashedRing(color, size = 44) {
 }
 function addLayers() {
   const empty = { type: "FeatureCollection", features: [] };
-  const clusterProps = {}; TYPES.forEach((t, i) => clusterProps["c" + i] = ["+", ["case", ["==", ["get", "t"], i], 1, 0]]);
-  map.addSource("events", { type: "geojson", data: { type: "FeatureCollection", features: st.filtered }, cluster: true, clusterMaxZoom: 13, clusterRadius: 48, clusterProperties: clusterProps, buffer: 64, tolerance: 0.5 });
+  const clusterProps = { n: ["+", ["coalesce", ["get", "g"], 1]] };
+  TYPES.forEach((t, i) => clusterProps["c" + i] = ["+", ["coalesce", ["get", "g" + i], ["case", ["==", ["get", "t"], i], 1, 0]]]);
+  map.addSource("events", { type: "geojson", data: { type: "FeatureCollection", features: st.mapFeats || [] }, cluster: true, clusterMaxZoom: 13, clusterRadius: 48, clusterProperties: clusterProps, buffer: 64, tolerance: 0.5 });
   ["community", "arcs", "theories", "waves", "sel", "ctx", "visitors"].forEach(id => map.addSource(id, { type: "geojson", data: empty }));
   TYPES.forEach(t => { if (!map.hasImage("ring-" + t.id)) map.addImage("ring-" + t.id, dashedRing(t.color), { pixelRatio: 2 });
     if (!map.hasImage("sh-" + t.id)) map.addImage("sh-" + t.id, shapeIcon(t, false), { pixelRatio: 2 });
@@ -234,8 +347,10 @@ function addLayers() {
   // clusters: an (almost) invisible hit circle for taps; the visible donut (type mix + count) is an HTML marker, see updateDonuts()
   map.addLayer({ id: "clusters", type: "circle", source: "events", filter: ["has", "point_count"], paint: {
     "circle-color": domColorExpr(), "circle-opacity": 0.004, "circle-stroke-width": 0,
-    "circle-radius": ["step", ["get", "point_count"], DONUT_R[0], 10, DONUT_R[1], 100, DONUT_R[2], 1000, DONUT_R[3], 10000, DONUT_R[4]] } });
-  map.addLayer({ id: "pts", type: "symbol", source: "events", filter: ["!", ["has", "point_count"]], layout: {
+    "circle-radius": ["step", ["get", "n"], DONUT_R[0], 10, DONUT_R[1], 100, DONUT_R[2], 1000, DONUT_R[3], 10000, DONUT_R[4]] } });
+  map.addLayer({ id: "stacks", type: "circle", source: "events", filter: ["all", ["!", ["has", "point_count"]], ["has", "g"]], paint: {
+    "circle-color": "#000", "circle-opacity": 0.004, "circle-radius": ["step", ["get", "g"], DONUT_R[0], 10, DONUT_R[1], 100, DONUT_R[2], 1000, DONUT_R[3]] } });
+  map.addLayer({ id: "pts", type: "symbol", source: "events", filter: ["all", ["!", ["has", "point_count"]], ["!", ["has", "g"]]], layout: {
     "icon-image": ["concat", "sh-", ["match", ["get", "t"], ...TYPES.flatMap((t, i) => [i, t.id]), "other"], ["case", ["==", ["get", "c"], 1], "-c", ""]],
     "icon-size": ["interpolate", ["linear"], ["zoom"], 2, 0.72, 8, 0.95, 14, 1.15], "icon-allow-overlap": true, "icon-ignore-placement": true,
     "symbol-sort-key": ["get", "c"] } });
@@ -249,11 +364,16 @@ function addLayers() {
   map.addLayer({ id: "theories", type: "line", source: "theories", layout: { "line-cap": "round" }, paint: { "line-color": "#ff7ad9", "line-width": 2.5, "line-dasharray": [2, 2], "line-opacity": 0.9 } });
   map.addLayer({ id: "theories-hit", type: "line", source: "theories", paint: { "line-color": "#000", "line-opacity": 0.01, "line-width": 16 } });
   map.addLayer({ id: "theories-lbl", type: "symbol", source: "theories", layout: { "symbol-placement": "line-center", "text-field": ["concat", "Community theory: ", ["get", "label"]], "text-font": font, "text-size": 12, "text-optional": true }, paint: { "text-color": "#ffc6ee", "text-halo-color": "#1a0b24", "text-halo-width": 1.5 } });
+  map.addSource("spider", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "spider-legs", type: "line", source: "spider", filter: ["has", "leg"], paint: { "line-color": "#ffffff", "line-width": 1.6, "line-opacity": 0.85 } });
+  map.addLayer({ id: "spider-pts", type: "symbol", source: "spider", filter: ["!", ["has", "leg"]], layout: {
+    "icon-image": ["concat", "sh-", ["match", ["get", "t"], ...TYPES.flatMap((t, i) => [i, t.id]), "other"], ["case", ["==", ["get", "c"], 1], "-c", ""]],
+    "icon-size": 1.2, "icon-allow-overlap": true, "icon-ignore-placement": true } });
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: { "circle-radius": 14, "circle-color": "rgba(255,255,255,0.08)", "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
 }
 function refreshAll() {
   if (!map.getSource("events")) return;
-  clearDonuts(); map.getSource("events").setData({ type: "FeatureCollection", features: st.filtered });
+  clearDonuts(); map.getSource("events").setData({ type: "FeatureCollection", features: st.mapFeats || [] });
   renderCommunity(); renderArcs(); renderTheories(); renderWaves(); renderCtx(); renderVisitors(); renderSel();
 }
 
@@ -267,6 +387,7 @@ async function loadType(t) {
     for (let i = 0; i < col.lon.length; i++) {
       const p = { i: t + "-" + i, t: ti, d: col.d[i], s: col.s[i], n: col.n[i] };
       if (cur.has(i)) p.c = 1; const k = col.k[i]; if (k) p.k = k; const w = col.w[i]; if (w !== undefined) p.w = w;
+      const q = col.q && col.q[i] !== undefined ? col.q[i] : col.qd; if (q) p.q = q;
       feats[i] = { type: "Feature", geometry: { type: "Point", coordinates: [col.lon[i], col.lat[i]] }, properties: p };
     }
     st.pts[t] = feats; indexGrid(feats); return feats;
@@ -283,7 +404,7 @@ async function getDetail(id) {
   if (!st.detailCache[key]) st.detailCache[key] = getJSON(`data/detail/${key}.json${V}`);
   const recs = await st.detailCache[key]; const r = recs[id]; if (!r) return null;
   const f = ptById(id);
-  return { ...r, id, type: t, lon: f ? f.geometry.coordinates[0] : null, lat: f ? f.geometry.coordinates[1] : null };
+  return { ...r, id, type: t, q: f ? f.properties.q : undefined, lon: f ? f.geometry.coordinates[0] : null, lat: f ? f.geometry.coordinates[1] : null };
 }
 
 /* ------------------------------------------------------------ filtering */
@@ -314,13 +435,13 @@ async function applyFilters() {
     if (q && !(c.title + " " + (c.description || "")).toLowerCase().includes(q)) return false;
     if (!st.enabled.has(c.type)) return false; cc++; return st.community_on;
   });
-  st.filtered = out; st.counts = counts; st.totals = totals; st.communityCount = cc;
+  st.filtered = out; st.mapFeats = groupStacks(out); st.counts = counts; st.totals = totals; st.communityCount = cc;
   const shown = out.length + st.communityFiltered.length;
   const all = Object.values(totals).reduce((a, b) => a + b, 0) + st.community.length;
   $("#total-shown").textContent = fmtN(shown); $("#total-all").textContent = fmtN(all);
   $("#count-badge").textContent = shown >= 1000 ? (shown / 1000).toFixed(shown >= 1e4 ? 0 : 1) + "k" : shown;
   renderTypeList();
-  if (map && map.getSource("events")) { clearDonuts(); map.getSource("events").setData({ type: "FeatureCollection", features: out }); renderCommunity(); }
+  if (map && map.getSource("events")) { clearDonuts(); unspiderfy(); map.getSource("events").setData({ type: "FeatureCollection", features: st.mapFeats }); renderCommunity(); }
 }
 function renderTypeList() {
   const rows = TYPES.map(t => `<li><button data-type="${t.id}" aria-pressed="${st.enabled.has(t.id)}"><span class="dot">${shapeSVG(t, 16)}</span><span class="tl">${esc(t.label)}${t.sub ? `<span class="sub">${t.sub}</span>` : ""}</span><span class="tc">${st.counts ? fmtN(st.counts[t.id]) : "…"}</span></button></li>`);
@@ -333,7 +454,7 @@ function renderTypeList() {
 function clearSelection() {
   st.selected = null; st.arcs = [];
   if (map && map.getSource("sel")) { renderSel(); renderArcs(); }
-  if (location.hash.startsWith("#e=")) history.replaceState(null, "", location.pathname + location.search);
+
 }
 function renderSel() { const s = st.selected; map.getSource("sel").setData({ type: "FeatureCollection", features: s && s.lon != null ? [{ type: "Feature", geometry: { type: "Point", coordinates: [s.lon, s.lat] }, properties: {} }] : [] }); }
 async function selectEvent(id, opts = {}) {
@@ -341,7 +462,11 @@ async function selectEvent(id, opts = {}) {
   let r; try { r = await getDetail(id); } catch (e) { toast("Couldn't load details."); return; }
   if (!r) { toast("Event not found."); return; }
   st.selected = r; renderSel(); renderDetail(r); openSheet("detail");
-  history.replaceState(null, "", "#e=" + encodeURIComponent(id));
+  if (!opts.noNav) {
+    const top = navTop(), list = top && top.key === "list" ? top.data : null;
+    navPush("event", "#event=" + encodeURIComponent(id), list ? () => renderStackList(list, { noNav: true }) : () => closeSheetRaw("detail"),
+      { replaceKeys: isPhone() ? ["filters"] : [] });
+  }
   if (opts.fly && r.lon != null) map.flyTo({ center: [r.lon, r.lat], zoom: Math.max(map.getZoom(), opts.zoom || 7), speed: 1.4, padding: flyPad() });
   computeArcs(r); renderArcs(); renderDetailLinks(r);
   ensureCtx().then(() => renderPattern(r)).catch(() => {});
@@ -380,7 +505,7 @@ function renderDetail(r) {
   if (gen && r.src !== "curated") srcs.push({ label: "Dataset: " + gen.name, url: gen.url });
   const lic = r.license || (gen && gen.license) || "";
   $("#detail-body").innerHTML = `<h2 class="d-title">${esc(r.title)}</h2>
-   <div class="d-meta">📅 ${esc(fmtDate(r.date))}${r.time ? " " + esc(r.time) : ""} · 📍 ${esc(r.place || "")}${r.precision && r.precision !== "city" ? ` <small>(${esc(r.precision)}-level location)</small>` : ""}</div>
+   <div class="d-meta">📅 ${esc(fmtDate(r.date))}${r.time ? " " + esc(r.time) : ""} · 📍 ${esc(r.place || "")}</div>${precNote(r.q) ? `<div class="approx">⚠️ ${precNote(r.q)}</div>` : ""}
    ${imgs}<p>${esc(r.summary || "")}</p>${scoreHTML(r.score)}
    ${ex ? `<div class="sec"><h4>Witness statements</h4>${ex}</div>` : ""}
    ${(r.evidence || []).length ? `<div class="sec"><h4>Evidence notes</h4><ul class="ev">${r.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
@@ -388,11 +513,11 @@ function renderDetail(r) {
    <div class="sec"><h4>Sources</h4><ul class="src">${srcs.map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.label)}</a></li>`).join("") || "<li>No source links.</li>"}</ul>${lic ? `<p class="hint">License: ${esc(lic)}</p>` : ""}${!(r.images || []).length && !r.community ? `<p class="hint">Images appear only when public domain or openly licensed; otherwise follow the source links.</p>` : ""}</div>
    ${rumorsHTML(r)}<div id="pattern"></div>
    <div class="sec"><h4>Connections <small style="text-transform:none;letter-spacing:0">(within ${st.days} days &amp; ${st.km} km)</small></h4><div id="d-links"><p class="hint">Computing…</p></div></div>
-   <div class="d-actions"><button class="btn ghost small" id="d-zoom">🔍 Zoom to street level</button><button class="btn ghost small" id="d-theory">💭 Draw a theory line</button><button class="btn ghost small" id="d-share">🔗 Copy link</button></div>`;
+   <div class="d-actions"><button class="btn ghost small" id="d-zoom">🔍 Zoom to street level</button><button class="btn ghost small" id="d-theory">💭 Draw a theory line</button><button class="btn ghost small" id="d-share">🔗 Share</button></div>`;
   $("#detail-body").scrollTop = 0;
   $("#d-zoom").onclick = () => r.lon != null && map.flyTo({ center: [r.lon, r.lat], zoom: 15, speed: 1.2, padding: flyPad() });
   $("#d-theory").onclick = () => startLinkMode(r);
-  $("#d-share").onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(() => toast("Link copied")); };
+  $("#d-share").onclick = () => { const u = shareURL(r.id); if (navigator.share && isPhone()) navigator.share({ title: r.title, url: u }).catch(() => {}); else if (navigator.clipboard) navigator.clipboard.writeText(u).then(() => toast("Link copied")); };
 }
 
 /* ------------------------------------------------------------ correlations (client-side) */
@@ -546,12 +671,15 @@ function notEnabled() { return !S.enabled || S.available === false; }
 function startAddMode() {
   if (notEnabled()) { modal("Community reports aren't enabled yet", `<p>The community database hasn't been set up yet (the site owner needs to run <code>supabase-atlas.sql</code>). Everything else works normally.</p>`); return; }
   setMode("add", isPhone() ? "Tap or long-press the map to drop a pin, or search an address above" : "Click the map to drop a pin, or search an address above");
-  if (isPhone()) { $("#detail").dataset.state = "closed"; $("#filters").dataset.state = "closed"; }
+  if (isPhone()) { closeSheet("detail"); closeSheet("filters"); }
 }
-function startLinkMode(a) { st.linkA = a; setMode("link", `Theory Board: tap a second event to link it to “${a.title.slice(0, 40)}”`); if (isPhone()) $("#detail").dataset.state = "closed"; }
+function startLinkMode(a) { st.linkA = a; setMode("link", `Theory Board: tap a second event to link it to “${a.title.slice(0, 40)}”`); if (isPhone()) { $("#detail").dataset.state = "closed"; navDrop(DETAIL_KEYS); } }
 function rateOk() { const k = "atlas_submits", now = Date.now(); const a = JSON.parse(localStorage.getItem(k) || "[]").filter(t => now - t < 3600e3); if (a.length >= C.SUBMIT_LIMIT_PER_HOUR) return false; a.push(now); localStorage.setItem(k, JSON.stringify(a)); return true; }
-function modal(title, html) { $("#modal-title").textContent = title; $("#modal-body").innerHTML = html; $("#modal").hidden = false; }
-function closeModal() { $("#modal").hidden = true; }
+function modal(title, html) {
+  $("#modal-title").textContent = title; $("#modal-body").innerHTML = html; $("#modal").hidden = false;
+  navPush("modal", "#" + (title.toLowerCase().match(/[a-z]+/g) || ["panel"]).slice(0, 2).join("-"), () => { $("#modal").hidden = true; });
+}
+function closeModal() { if ($("#modal").hidden) return; $("#modal").hidden = true; navDrop("modal"); }
 async function resizePhoto(file) {
   const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
   const sc = Math.min(1, C.PHOTO_MAX / Math.max(img.width, img.height)), c = document.createElement("canvas"); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
@@ -615,23 +743,25 @@ function openTheoryForm(a, b) {
 }
 
 /* ------------------------------------------------------------ search / fly to */
+function hideMenu() { const m = $("#more-menu"); if (m.hidden) return; m.hidden = true; navDrop("menu"); }
+function hideSearch() { const b = $("#search-results"); if (b.hidden) return; b.hidden = true; navDrop("search"); }
 let geoLast = 0;
 async function doSearch(q) {
-  const box = $("#search-results"); q = q.trim(); if (!q) { box.hidden = true; return; }
+  const box = $("#search-results"); q = q.trim(); if (!q) { hideSearch(); return; }
   const ql = q.toLowerCase(), hits = [];
   for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr) continue; for (const f of arr) if (f.properties.c && f.properties.n.toLowerCase().includes(ql)) hits.push(f); }
   for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr || hits.length >= 8) continue; for (const f of arr) { if (!f.properties.c && f.properties.n.toLowerCase().includes(ql)) { hits.push(f); if (hits.length >= 8) break; } } }
   let html = hits.length ? `<div class="sr-h">Events</div>` + hits.slice(0, 8).map(f => `<button type="button" data-id="${esc(f.properties.i)}">${shapeSVG(TYPES[f.properties.t], 12)} ${esc(f.properties.n)}</button>`).join("") : "";
   html += `<div class="sr-h">Fly to a place</div><div id="sr-places"><button type="button" disabled>Searching places…</button></div>`;
-  box.innerHTML = html; box.hidden = false;
-  box.querySelectorAll("button[data-id]").forEach(b => b.onclick = () => { box.hidden = true; selectEvent(b.dataset.id, { fly: true, zoom: 8 }); });
+  box.innerHTML = html; if (box.hidden) { box.hidden = false; navPush("search", "#search", () => { box.hidden = true; }); }
+  box.querySelectorAll("button[data-id]").forEach(b => b.onclick = () => { hideSearch(); selectEvent(b.dataset.id, { fly: true, zoom: 8 }); });
   const wait = Math.max(0, 1100 - (Date.now() - geoLast)); await new Promise(r => setTimeout(r, wait)); geoLast = Date.now();
   try {
     const res = await (await fetch(`${C.GEOCODER}?format=json&limit=5&q=${encodeURIComponent(q)}`, { headers: { "Accept-Language": "en" } })).json();
     const pl = $("#sr-places"); if (!pl) return;
     pl.innerHTML = res.length ? res.map((r, i) => `<button type="button" data-i="${i}">📍 ${esc(r.display_name)}</button>`).join("") : `<button type="button" disabled>No places found</button>`;
     pl.querySelectorAll("button[data-i]").forEach(b => b.onclick = () => {
-      const r = res[+b.dataset.i]; box.hidden = true; const bb = r.boundingbox.map(Number);
+      const r = res[+b.dataset.i]; hideSearch(); const bb = r.boundingbox.map(Number);
       if (st.mode === "add") { map.flyTo({ center: [+r.lon, +r.lat], zoom: 14 }); openAddForm({ lng: +r.lon, lat: +r.lat }, r.display_name.split(",").slice(0, 3).join(",")); }
       else map.fitBounds([[bb[2], bb[0]], [bb[3], bb[1]]], { maxZoom: 16, padding: 40, duration: 2400 });
     });
@@ -704,7 +834,7 @@ function wireDual(id, key, out, fmt) {
   a.oninput = b.oninput = upd; $(out).textContent = fmt(+a.value, +b.value);
 }
 function wireUI() {
-  $("#btn-filters").onclick = () => $("#filters").dataset.state === "closed" ? openSheet("filters") : closeSheet("filters");
+  $("#btn-filters").onclick = () => $("#filters").dataset.state === "closed" ? openFilters() : closeSheet("filters");
   $$("[data-close]").forEach(b => b.onclick = () => closeSheet(b.dataset.close));
   $("#type-list").onclick = e => { const b = e.target.closest("button[data-type]"); if (!b) return; const t = b.dataset.type;
     if (t === "community") st.community_on = !st.community_on; else st.enabled.has(t) ? st.enabled.delete(t) : st.enabled.add(t);
@@ -725,15 +855,15 @@ function wireUI() {
   $("#btn-connections").onclick = () => { st.connections = !st.connections; syncConnBtn(); renderWaves(); renderTheories(); renderArcs(); toast(st.connections ? "Connections on: report waves (yellow rings), curated links and community theories" : "Connections off"); };
   $("#btn-add").onclick = startAddMode;
   $("#mode-cancel").onclick = () => { st.linkA = null; setMode(null); };
-  $("#btn-more").onclick = e => { e.stopPropagation(); $("#more-menu").hidden = !$("#more-menu").hidden; };
-  document.addEventListener("click", e => { if (!e.target.closest("#more-menu") && !e.target.closest("#btn-more")) $("#more-menu").hidden = true; if (!e.target.closest("#search-form")) $("#search-results").hidden = true; });
+  $("#btn-more").onclick = e => { e.stopPropagation(); if ($("#more-menu").hidden) { $("#more-menu").hidden = false; navPush("menu", "#menu", () => { $("#more-menu").hidden = true; }); } else hideMenu(); };
+  document.addEventListener("click", e => { if (!e.target.closest("#more-menu") && !e.target.closest("#btn-more")) hideMenu(); if (!e.target.closest("#search-form")) hideSearch(); });
   $("#style-seg").innerHTML = Object.entries(C.STYLES).map(([k, s]) => `<button type="button" data-style="${k}" class="${k === st.style ? "on" : ""}">${s.label}</button>`).join("");
   $("#style-seg").onclick = e => { const b = e.target.closest("button[data-style]"); if (!b || b.dataset.style === st.style) return; st.style = b.dataset.style; $$("#style-seg button").forEach(x => x.classList.toggle("on", x === b)); clearDonuts(); styleFor(st.style).then(sty => map.setStyle(sty)); };
   $$("[data-ctx]").forEach(c => c.onchange = () => { c.checked ? st.ctxOn.add(c.dataset.ctx) : st.ctxOn.delete(c.dataset.ctx); renderCtx(); });
   $("#chk-visitors").onchange = e => { st.visitorsOn = e.target.checked; renderVisitors(); };
-  $("#btn-visitors").onclick = () => { $("#more-menu").hidden = true; openVisitors(); };
-  $("#btn-about").onclick = $("#foot-about").onclick = e => { e.preventDefault(); $("#more-menu").hidden = true; openAbout(); };
-  $("#btn-admin").onclick = () => { $("#more-menu").hidden = true; openAdmin(); };
+  $("#btn-visitors").onclick = () => { hideMenu(); openVisitors(); };
+  $("#btn-about").onclick = $("#foot-about").onclick = e => { e.preventDefault(); hideMenu(); openAbout(); };
+  $("#btn-admin").onclick = () => { hideMenu(); openAdmin(); };
   $("#modal-x").onclick = closeModal; $("#modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
   document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#modal").hidden) closeModal(); else if (st.mode) setMode(null); else closeSheet("detail"); } });
   let sT; $("#search").oninput = e => { clearTimeout(sT); const v = e.target.value; sT = setTimeout(() => v.length >= 3 && doSearch(v), 900); };
@@ -756,7 +886,11 @@ function wireSheets() {   // drag handle for phone bottom sheets
 function wireMapEvents() {
   const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: "300px", offset: 10 });
   let handled = 0; const mark = () => handled = Date.now(), was = () => Date.now() - handled < 50;
-  map.on("click", "pts", e => { mark(); selectEvent(e.features[0].properties.i); });
+  map.on("click", "spider-pts", e => { mark(); selectEvent(e.features[0].properties.i); });
+  map.on("click", "pts", e => { if (was()) return; mark(); selectEvent(e.features[0].properties.i); });
+  map.on("click", "stacks", e => { if (was()) return; mark(); openStack(e.features[0].properties.i); });
+  map.on("click", e => { if (!was() && st.spider) setTimeout(() => { if (!was()) unspiderfy(); }, 0); });
+  ["zoomstart", "rotatestart", "pitchstart"].forEach(ev => map.on(ev, () => unspiderfy()));
   map.on("click", "community", e => { mark(); selectEvent(e.features[0].properties.id); });
   map.on("click", "clusters", async e => {
     if (was()) return; mark(); const f = e.features[0];
@@ -771,7 +905,7 @@ function wireMapEvents() {
   map.on("click", "arcs-hit", e => { if (was()) return; mark(); hoverWhy(e, "Why linked:"); setTimeout(() => popup.remove(), 6000); });
   map.on("click", "theories-hit", e => { if (was()) return; mark(); hoverWhy(e, "💭 Community theory, speculation:"); setTimeout(() => popup.remove(), 8000); });
   map.on("click", "ctx-pts", e => { if (was()) return; mark(); const p = e.features[0].properties; new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<b>${esc(p.name)}</b><br><small>${esc(p.k)}${p.info ? " · " + esc(p.info) : ""}</small>`).addTo(map); });
-  ["clusters", "pts", "community", "waves", "ctx-pts"].forEach(l => { map.on("mouseenter", l, () => { if (!st.mode) map.getCanvas().style.cursor = "pointer"; }); map.on("mouseleave", l, () => { if (!st.mode) map.getCanvas().style.cursor = ""; }); });
+  ["clusters", "stacks", "spider-pts", "pts", "community", "waves", "ctx-pts"].forEach(l => { map.on("mouseenter", l, () => { if (!st.mode) map.getCanvas().style.cursor = "pointer"; }); map.on("mouseleave", l, () => { if (!st.mode) map.getCanvas().style.cursor = ""; }); });
   map.on("click", e => { setTimeout(() => { if (st.mode === "add" && !was()) openAddForm(e.lngLat); }, 0); });
   map.on("contextmenu", e => { if (!notEnabled()) openAddForm(e.lngLat); });
   let lp; map.on("touchstart", e => { if (!e.originalEvent.touches || e.originalEvent.touches.length !== 1) return; const ll = e.lngLat; lp = setTimeout(() => { if (notEnabled()) return toast("Community reports aren't enabled yet."); if (navigator.vibrate) navigator.vibrate(30); openAddForm(ll); }, 650); });
@@ -795,7 +929,8 @@ async function boot() {
     await loadType("ufo"); await applyFilters();
     loadCities();
     window.Atlas.ready = true;
-    const m = location.hash.match(/#e=([^&]+)/);
+    const m = location.hash.match(/#(?:event|e)=([^&]+)/);
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // base entry = bare globe, so Back from the deep-linked popup stays on the site
     if (m) { const id = decodeURIComponent(m[1]); const [t] = splitId(id); if (TI[t] !== undefined) { await loadType(t); if (t === "mass") { st.enabled.add("mass"); await applyFilters(); } } selectEvent(id, { fly: true }); }
     else if (!isPhone()) openSheet("filters");
     loadCommunity(); countVisit();
@@ -803,5 +938,6 @@ async function boot() {
 }
 window.Atlas.selectEvent = (id, o) => selectEvent(id, o);
 window.Atlas.applyFilters = () => applyFilters();
+window.Atlas.openStack = id => openStack(id);
 boot();
 })();

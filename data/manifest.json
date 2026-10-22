@@ -1,6 +1,6 @@
 {
  "name": "Anomaly Atlas",
- "built": "2026-10-21T22:23:17",
+ "built": "2026-10-22T02:16:40",
  "types": [
   "ufo",
   "bluebook",
@@ -14,56 +14,56 @@
  "files": {
   "ufo": {
    "points": "data/points/ufo.json",
-   "bytes": 5992302,
+   "bytes": 5992555,
    "count": 87214,
    "chunks": 219,
    "chunk_size": 400
   },
   "bluebook": {
    "points": "data/points/bluebook.json",
-   "bytes": 641169,
+   "bytes": 675294,
    "count": 9962,
    "chunks": 25,
    "chunk_size": 400
   },
   "cryptid": {
    "points": "data/points/cryptid.json",
-   "bytes": 402544,
+   "bytes": 402559,
    "count": 4061,
    "chunks": 11,
    "chunk_size": 400
   },
   "sound": {
    "points": "data/points/sound.json",
-   "bytes": 905,
+   "bytes": 920,
    "count": 16,
    "chunks": 1,
    "chunk_size": 400
   },
   "phenomenon": {
    "points": "data/points/phenomenon.json",
-   "bytes": 1149,
+   "bytes": 1164,
    "count": 20,
    "chunks": 1,
    "chunk_size": 400
   },
   "disappearance": {
    "points": "data/points/disappearance.json",
-   "bytes": 1690,
+   "bytes": 1705,
    "count": 27,
    "chunks": 1,
    "chunk_size": 400
   },
   "mass": {
    "points": "data/points/mass.json",
-   "bytes": 561,
+   "bytes": 576,
    "count": 8,
    "chunks": 1,
    "chunk_size": 400
   },
   "other": {
    "points": "data/points/other.json",
-   "bytes": 795,
+   "bytes": 810,
    "count": 14,
    "chunks": 1,
    "chunk_size": 400
