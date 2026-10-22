@@ -1,0 +1,161 @@
+{
+ "name": "Anomaly Atlas",
+ "built": "2026-10-21T22:23:17",
+ "types": [
+  "ufo",
+  "bluebook",
+  "cryptid",
+  "sound",
+  "phenomenon",
+  "disappearance",
+  "mass",
+  "other"
+ ],
+ "files": {
+  "ufo": {
+   "points": "data/points/ufo.json",
+   "bytes": 5992302,
+   "count": 87214,
+   "chunks": 219,
+   "chunk_size": 400
+  },
+  "bluebook": {
+   "points": "data/points/bluebook.json",
+   "bytes": 641169,
+   "count": 9962,
+   "chunks": 25,
+   "chunk_size": 400
+  },
+  "cryptid": {
+   "points": "data/points/cryptid.json",
+   "bytes": 402544,
+   "count": 4061,
+   "chunks": 11,
+   "chunk_size": 400
+  },
+  "sound": {
+   "points": "data/points/sound.json",
+   "bytes": 905,
+   "count": 16,
+   "chunks": 1,
+   "chunk_size": 400
+  },
+  "phenomenon": {
+   "points": "data/points/phenomenon.json",
+   "bytes": 1149,
+   "count": 20,
+   "chunks": 1,
+   "chunk_size": 400
+  },
+  "disappearance": {
+   "points": "data/points/disappearance.json",
+   "bytes": 1690,
+   "count": 27,
+   "chunks": 1,
+   "chunk_size": 400
+  },
+  "mass": {
+   "points": "data/points/mass.json",
+   "bytes": 561,
+   "count": 8,
+   "chunks": 1,
+   "chunk_size": 400
+  },
+  "other": {
+   "points": "data/points/other.json",
+   "bytes": 795,
+   "count": 14,
+   "chunks": 1,
+   "chunk_size": 400
+  }
+ },
+ "counts_by_source": {
+  "curated": {
+   "ufo": 31,
+   "bluebook": 5,
+   "cryptid": 16,
+   "sound": 16,
+   "phenomenon": 20,
+   "other": 14,
+   "disappearance": 27,
+   "mass": 8
+  },
+  "bluebook": {
+   "bluebook": 9957
+  },
+  "bfro": {
+   "cryptid": 4045
+  },
+  "nuforc": {
+   "ufo": 87183
+  }
+ },
+ "counts_by_type": {
+  "ufo": 87214,
+  "bluebook": 9962,
+  "cryptid": 4061,
+  "sound": 16,
+  "phenomenon": 20,
+  "disappearance": 27,
+  "mass": 8,
+  "other": 14
+ },
+ "total": 101322,
+ "sources": {
+  "nuforc": {
+   "id": "nuforc",
+   "name": "NUFORC reports (planetsig/ufo-reports mirror)",
+   "url": "https://github.com/planetsig/ufo-reports",
+   "data_url": "https://raw.githubusercontent.com/planetsig/ufo-reports/master/csv-data/ufo-complete-geocoded-time-standardized.csv",
+   "license": "No explicit license in mirror; reports are publicly posted by NUFORC (nuforc.org). Short excerpts with attribution, link back."
+  },
+  "bluebook": {
+   "id": "bluebook",
+   "name": "Project Blue Book case files (Internet Archive \"bluebook\" collection index)",
+   "url": "https://archive.org/details/bluebook",
+   "data_url": "https://archive.org/download/bluebook/1950s.zip/ (zip file listings)",
+   "license": "Public domain (US Air Force records; IA marks Public Domain Mark 1.0). Geocoding: GeoNames CC BY 4.0."
+  },
+  "bfro": {
+   "id": "bfro",
+   "name": "BFRO reports (Timothy Renner geocoded dataset, TidyTuesday mirror)",
+   "url": "https://github.com/timothyrenner/bfro_sightings_data",
+   "data_url": "https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-09-13/bigfoot.csv",
+   "license": "Scraper code MIT; report text \u00a9 BFRO (bfro.net). Short attributed excerpts + link to original report."
+  },
+  "curated": {
+   "id": "curated",
+   "name": "Curated notable cases (Wikipedia + official reports)",
+   "url": "https://en.wikipedia.org/",
+   "license": "Summaries written for this project; Wikipedia CC BY-SA 4.0; images Wikimedia Commons (PD / CC, attributed per image)"
+  }
+ },
+ "waves": 36,
+ "links": 32,
+ "keywords": [
+  "triangle",
+  "orb",
+  "disk",
+  "cigar",
+  "fireball",
+  "formation",
+  "hovering",
+  "silent",
+  "beam",
+  "missing time",
+  "abduction",
+  "hum",
+  "boom",
+  "footprints",
+  "howl/scream",
+  "smell",
+  "flash",
+  "vanished"
+ ],
+ "context_counts": {
+  "military": 739,
+  "airports": 5280,
+  "launch": 27,
+  "showers": 12
+ }
+}

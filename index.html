@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05060f">
+<title>Anomaly Atlas: a globe of unexplained events</title>
+<meta name="description" content="Explore UFO sightings, Project Blue Book cases, cryptids, strange sounds, phenomena and mysteries on a zoomable 3D globe, each with a transparent credibility score.">
+<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas1">
+<link rel="stylesheet" href="styles.css?v=atlas1">
+</head>
+<body>
+<div id="stars" aria-hidden="true"></div>
+<div id="map" role="application" aria-label="Globe map of unexplained events"></div>
+
+<header id="topbar">
+  <div class="brand"><span class="logo" aria-hidden="true">◎</span><span class="name">Anomaly Atlas</span></div>
+  <form id="search-form" class="search" role="search" autocomplete="off">
+    <input id="search" type="search" placeholder="Fly to a place or find an event…" aria-label="Fly to a place or find an event">
+    <div id="search-results" class="search-results" hidden></div>
+  </form>
+  <nav class="actions">
+    <button id="btn-filters" class="pill" aria-controls="filters" title="Filters, legend, connections">☰ <span class="lbl">Filters</span> <b id="count-badge">…</b></button>
+    <button id="btn-connections" class="pill toggle" aria-pressed="false" title="Show connections, waves and community theories">✦ <span class="lbl">Connections</span></button>
+    <button id="btn-add" class="pill accent" title="Add an event">＋ <span class="lbl">Add event</span></button>
+    <button id="btn-more" class="pill icon" aria-haspopup="true" title="More">⋯</button>
+  </nav>
+  <div id="more-menu" class="menu" hidden>
+    <div class="menu-h">Basemap</div>
+    <div class="seg" id="style-seg"></div>
+    <div class="menu-h">Context layers</div>
+    <label class="chk"><input type="checkbox" data-ctx="military"> Military bases &amp; test ranges</label>
+    <label class="chk"><input type="checkbox" data-ctx="launch"> Rocket launch sites</label>
+    <label class="chk"><input type="checkbox" data-ctx="airports"> Airports</label>
+    <label class="chk"><input type="checkbox" id="chk-visitors"> Visitor cities</label>
+    <hr>
+    <button class="menu-item" id="btn-visitors">👁 Visitors</button>
+    <button class="menu-item" id="btn-about">ⓘ About, sources &amp; scoring</button>
+    <button class="menu-item" id="btn-admin">🔒 Admin</button>
+  </div>
+</header>
+
+<!-- Filters: left panel on desktop, bottom sheet on phones -->
+<aside id="filters" class="panel sheet" aria-label="Filters" data-state="closed">
+  <div class="sheet-handle" aria-hidden="true"><span></span></div>
+  <div class="panel-head"><h2>Explore</h2><button class="x" data-close="filters" aria-label="Close filters">✕</button></div>
+  <div class="panel-body">
+    <div class="total"><b id="total-shown">0</b> of <span id="total-all">0</span> events shown</div>
+    <input id="q" type="search" class="field" placeholder="Search titles (e.g. triangle, Phoenix, hum)…" aria-label="Search event titles">
+    <h3>Event types <small>tap to toggle</small></h3>
+    <ul id="type-list" class="types"></ul>
+    <h3>Credibility score <output id="cred-out">0–100</output></h3>
+    <div class="range2" id="cred-range"><input type="range" min="0" max="100" value="0" aria-label="Minimum credibility"><input type="range" min="0" max="100" value="100" aria-label="Maximum credibility"></div>
+    <div id="uq-wrap" hidden>
+      <h3>Unanswered-questions score <output id="uq-out">0–100</output></h3>
+      <div class="range2 uq" id="uq-range"><input type="range" min="0" max="100" value="0" aria-label="Minimum unanswered-questions score"><input type="range" min="0" max="100" value="100" aria-label="Maximum unanswered-questions score"></div>
+      <p class="hint">For mass-casualty events this scores the <em>why</em> (how unresolved the motive is), never whether it happened.</p>
+    </div>
+    <h3>Date range <output id="date-out"></output></h3>
+    <div class="range2" id="date-range"><input type="range" min="1000" max="2026" value="1000" aria-label="From year"><input type="range" min="1000" max="2026" value="2026" aria-label="To year"></div>
+    <label class="chk"><input type="checkbox" id="chk-undated" checked> Include undated events</label>
+
+    <h3>Connections</h3>
+    <label class="chk"><input type="checkbox" id="chk-autoconnect" checked> Draw arcs to correlated events on select</label>
+    <div class="slider-row"><label for="conn-days">Within</label><input id="conn-days" type="range" min="0" max="365" value="7"><output id="conn-days-out">7 days</output></div>
+    <div class="slider-row"><label for="conn-km">Within</label><input id="conn-km" type="range" min="10" max="1000" step="10" value="150"><output id="conn-km-out">150 km</output></div>
+    <div class="arc-legend"><span>weak</span><i></i><span>strong</span></div>
+    <p class="hint">Arcs show up to 25 links ranked by time proximity, distance, shared type/keywords and report waves. Correlation isn't causation.</p>
+    <button class="btn ghost wide" id="btn-reset">Reset filters</button>
+  </div>
+</aside>
+
+<!-- Event detail: right panel on desktop, bottom sheet on phones -->
+<aside id="detail" class="panel sheet right" aria-label="Event details" data-state="closed">
+  <div class="sheet-handle" aria-hidden="true"><span></span></div>
+  <div class="panel-head"><div id="detail-kicker" class="kicker"></div><button class="x" data-close="detail" aria-label="Close details">✕</button></div>
+  <div class="panel-body" id="detail-body"></div>
+</aside>
+
+<div id="legend-chip" class="legend-chip" aria-hidden="true"></div>
+<div id="mode-bar" class="mode-bar" hidden><span id="mode-text"></span><button class="btn small" id="mode-cancel">Cancel</button></div>
+
+<!-- Generic modal -->
+<div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-card"><div class="modal-head"><h2 id="modal-title"></h2><button class="x" id="modal-x" aria-label="Close">✕</button></div><div id="modal-body" class="modal-body"></div></div>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<div id="loading" class="loading"><div class="orbit"><i></i></div><p id="loading-text">Loading the atlas…</p></div>
+
+<footer id="foot">
+  <span>Anomaly Atlas · <a href="#" id="foot-about">Sources &amp; scoring</a> · Privacy: we count visits by approximate city only; no IPs or personal data are stored.</span>
+</footer>
+
+<script src="config.js?v=atlas1"></script>
+<script src="vendor/maplibre-gl.js?v=atlas1"></script>
+<script src="store.js?v=atlas1"></script>
+<script src="app.js?v=atlas1"></script>
+</body>
+</html>
