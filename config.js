@@ -1,6 +1,6 @@
 // ===== Anomaly Atlas — configuration =====
 window.ATLAS_CONFIG = {
-  VERSION: "atlas4",
+  VERSION: "atlas5",
   // Supabase (shared with the family-recipes project; Atlas only uses atlas_* tables/RPCs + the atlas-photos bucket).
   // The publishable key is meant to be public. Leave SUPABASE_URL blank to run fully offline (no community features).
   SUPABASE_URL: "https://pcxmlmhwlyaqabaujoxa.supabase.co",

@@ -6,11 +6,12 @@
 <meta name="theme-color" content="#05060f">
 <title>Anomaly Atlas: a globe of unexplained events</title>
 <meta name="description" content="Explore UFO sightings, Project Blue Book cases, cryptids, strange sounds, phenomena and mysteries on a zoomable 3D globe, each with a transparent credibility score.">
-<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas4">
-<link rel="stylesheet" href="styles.css?v=atlas4">
+<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas5">
+<link rel="stylesheet" href="styles.css?v=atlas5">
 </head>
 <body>
 <div id="stars" aria-hidden="true"></div>
+<div id="atmo-glow" aria-hidden="true" hidden></div>
 <div id="map" role="application" aria-label="Globe map of unexplained events"></div>
 
 <header id="topbar">
@@ -49,6 +50,7 @@
     <input id="q" type="search" class="field" placeholder="Search titles (e.g. triangle, Phoenix, hum)…" aria-label="Search event titles">
     <h3>Event types <small>tap to toggle</small></h3>
     <ul id="type-list" class="types"></ul>
+    <div id="view-list-wrap" hidden><h3 id="view-list-h">Items</h3><ul id="view-list" class="view-list"></ul></div>
     <h3>Credibility score <output id="cred-out">0–100</output></h3>
     <div class="range2" id="cred-range"><input type="range" min="0" max="100" value="0" aria-label="Minimum credibility"><input type="range" min="0" max="100" value="100" aria-label="Maximum credibility"></div>
     <div id="uq-wrap" hidden>
@@ -57,9 +59,9 @@
       <p class="hint">Mass events: scores the <em>why</em> (how unresolved the motive is). Missing persons: how unresolved the case is (found alive is low, never found is high). Never whether it happened.</p>
     </div>
     <div id="missing-wrap" hidden>
-      <h3>Missing persons: outcome</h3>
+      <h3 id="missing-h">Missing persons: outcome</h3>
       <div class="chips" id="outcome-chips"></div>
-      <label class="chk"><input type="checkbox" id="m411-toggle"> Missing 411 case only <small class="hint">(<span id="m411-count">0</span> tagged)</small></label>
+      <label class="chk" id="m411-row"><input type="checkbox" id="m411-toggle"> Missing 411 case only <small class="hint">(<span id="m411-count">0</span> tagged)</small></label>
     </div>
     <h3>Date range <output id="date-out"></output></h3>
     <div class="range2" id="date-range"><input type="range" min="1000" max="2026" value="1000" aria-label="From year"><input type="range" min="1000" max="2026" value="2026" aria-label="To year"></div>
@@ -83,6 +85,28 @@
   <div class="panel-body" id="detail-body"></div>
 </aside>
 
+<div id="view-seg" class="view-seg" role="group" aria-label="View">
+  <button type="button" data-view="earth" class="on" aria-pressed="true">🌍 Earth</button><button type="button" data-view="atmos" aria-pressed="false">🛰 Atmosphere</button><button type="button" data-view="under" aria-pressed="false">⛏ Underground</button>
+</div>
+<button id="btn-parks" class="pill np-btn" type="button" aria-controls="parks" title="National park disappearances, 1900 to now">🏞 <span>National Parks</span></button>
+
+<!-- National Parks list (Earth view only): left panel on desktop, bottom sheet on phones -->
+<aside id="parks" class="panel sheet" aria-label="National park disappearances" data-state="closed">
+  <div class="sheet-handle" aria-hidden="true"><span></span></div>
+  <div class="panel-head"><h2>🏞 National park disappearances</h2><button class="x" data-close="parks" aria-label="Close the park list">✕</button></div>
+  <div class="panel-body">
+    <div class="np-count total" id="np-count" aria-live="polite">…</div>
+    <input id="np-q" type="search" class="field" placeholder="Find a park (e.g. Yosemite, AK)…" aria-label="Search parks">
+    <h3>Years <output id="np-yr-out"></output></h3>
+    <div class="range2" id="np-years"><input type="range" min="1900" max="2026" value="1900" aria-label="From year"><input type="range" min="1900" max="2026" value="2026" aria-label="To year"></div>
+    <h3>Outcome</h3>
+    <div class="chips" id="np-oc"></div>
+    <label class="chk"><input type="checkbox" id="np-m411"> Missing 411 cases only <small class="hint">(<span id="np-m411-n">0</span> tagged)</small></label>
+    <button class="btn ghost small" id="np-reset" type="button">Reset list filters</button>
+    <p class="hint">Parks with the most cases first; newest case first inside each park. Tap a park to open it, tap a case to fly to its pin. Sources: NPS lists and records, news archives (see each case).</p>
+    <ul id="np-list" class="np-list"></ul>
+  </div>
+</aside>
 <div id="legend-chip" class="legend-chip" aria-hidden="true"></div>
 <div id="mode-bar" class="mode-bar" hidden><span id="mode-text"></span><button class="btn small" id="mode-cancel">Cancel</button></div>
 
@@ -97,9 +121,9 @@
   <span>Anomaly Atlas · <a href="#" id="foot-about">Sources &amp; scoring</a> · Privacy: we count visits by approximate city only; no IPs or personal data are stored.</span>
 </footer>
 
-<script src="config.js?v=atlas4"></script>
-<script src="vendor/maplibre-gl.js?v=atlas4"></script>
-<script src="store.js?v=atlas4"></script>
-<script src="app.js?v=atlas4"></script>
+<script src="config.js?v=atlas5"></script>
+<script src="vendor/maplibre-gl.js?v=atlas5"></script>
+<script src="store.js?v=atlas5"></script>
+<script src="app.js?v=atlas5"></script>
 </body>
 </html>

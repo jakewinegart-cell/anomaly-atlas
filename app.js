@@ -10,7 +10,14 @@ const TYPES = [
   { id: "phenomenon", label: "Strange phenomenon", color: "#ff2bd6", shape: "star" },
   { id: "disappearance", label: "Disappearance (unexplained)", color: "#ff1f3d", shape: "hexagon" },
   { id: "mass", label: "Mass event: motive unexplained", color: "#f2f2f2", shape: "target", sub: "Documented tragedies · off by default" },
-  { id: "other", label: "High strangeness / other", color: "#ffe500", shape: "cross" }];
+  { id: "other", label: "High strangeness / other", color: "#ffe500", shape: "cross" },
+  // atlas5: appended (type indices of earlier types stay stable). Each type belongs to exactly one exclusive view.
+  // Colour slot reserved for a future "Abduction" type: #00ffc8 (aqua-mint), not used by any type below.
+  { id: "space", label: "Space / orbital anomaly", color: "#a970ff", shape: "sparkle", view: "atmos" },
+  { id: "ug_anomaly", label: "Underground anomaly", color: "#e0a458", shape: "invtri", view: "under" },
+  { id: "ug_missing", label: "Underground disappearance", color: "#ff7eb6", shape: "pentagon", view: "under", sub: "Caves, mines, sinkholes, tunnels" }];
+TYPES.forEach(t => t.view = t.view || "earth");
+const VIEWS = { earth: "Earth", atmos: "Atmosphere", under: "Underground" };
 const COMMUNITY_COLOR = "#ffffff";
 /* ---- marker shapes: one geometry used by both the map icons (canvas) and the UI chips (SVG) ---- */
 function shapePts(shape) {   // polygon vertices in a unit box centred on 0,0 (radius ~1)
@@ -21,6 +28,9 @@ function shapePts(shape) {   // polygon vertices in a unit box centred on 0,0 (r
     case "diamond": return [[0, -1.08], [0.85, 0], [0, 1.08], [-0.85, 0]];
     case "star": return Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.48 : 1.1; return [r * Math.cos(a), r * Math.sin(a)]; });
     case "hexagon": return poly(6, Math.PI / 6, 0.98);
+    case "sparkle": return Array.from({ length: 8 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 4, r = i % 2 ? 0.38 : 1.1; return [r * Math.cos(a), r * Math.sin(a)]; });
+    case "invtri": return [[0, 1.05], [0.98, -0.72], [-0.98, -0.72]];
+    case "pentagon": return poly(5, -Math.PI / 2);
     case "cross": { const a = 0.36, b = 1.0; return [[-a, -b], [a, -b], [a, -a], [b, -a], [b, a], [a, a], [a, b], [-a, b], [-a, a], [-b, a], [-b, -a], [-a, -a]]; }
     default: return null;   // circle / target
   }
@@ -45,7 +55,8 @@ function shapeIcon(t, curated) {   // canvas icon at 2x: soft glow, thin dark ou
 }
 const TI = Object.fromEntries(TYPES.map((t, i) => [t.id, i]));
 const SPEC_OK = new Set(["ufo", "bluebook", "cryptid", "sound", "phenomenon"]);
-const NO_SPEC = new Set(["mass", "disappearance"]);
+const NO_SPEC = new Set(["mass", "disappearance", "ug_missing"]);
+const inView = t => (typeof t === "string" ? TYPES[TI[t]] : t).view === st.view;
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isPhone = () => matchMedia("(max-width:820px)").matches;
@@ -57,7 +68,7 @@ const st = {
   cred: [0, 100], uq: [0, 100], years: [1000, 2026], undated: true, q: "",
   outcomes: new Set(["a", "d", "n", "u"]), m411: false,
   connections: false, autoconnect: true, days: 7, km: 150, style: "realistic", ctxOn: new Set(), visitorsOn: false,
-  selected: null, arcs: [], detailCache: {}, mode: null, linkA: null, visitors: null, admin: null, filtered: []
+  selected: null, arcs: [], detailCache: {}, mode: null, linkA: null, visitors: null, admin: null, filtered: [], view: "earth", viewFeats: []
 };
 window.Atlas = { st, ready: false, errors: [] };
 
@@ -94,14 +105,20 @@ function shareURL(id) { return location.origin + location.pathname + location.se
 function openSheet(id, state) {
   const el = $("#" + id); el.dataset.state = state || (isPhone() ? "half" : "open");
   if (id === "filters") document.body.classList.add("filters-open");
-  if (isPhone()) { const other = id === "filters" ? "detail" : "filters"; $("#" + other).dataset.state = "closed"; }
+  if (isPhone()) for (const other of ["filters", "detail", "parks"]) if (other !== id) { const o = $("#" + other); if (o) o.dataset.state = "closed"; }
+  if (id === "filters") { const pk = $("#parks"); if (pk && pk.dataset.state !== "closed") pk.dataset.state = "closed"; }   // filters and the parks list share the left side
 }
-function closeSheetRaw(id) { $("#" + id).dataset.state = "closed"; if (id === "filters") document.body.classList.remove("filters-open"); if (id === "detail") { clearSelection(); unspiderfy && map && unspiderfy(); } }
-function closeSheet(id) { closeSheetRaw(id); navDrop(id === "detail" ? DETAIL_KEYS : [id]); }
+function closeSheetRaw(id) { $("#" + id).dataset.state = "closed"; if (id === "filters") document.body.classList.remove("filters-open"); if (id === "parks") document.body.classList.remove("parks-open"); if (id === "detail") { clearSelection(); unspiderfy && map && unspiderfy(); } }
+function closeSheet(id) {
+  const top = navTop(), backToParks = id === "detail" && top && top.key === "event" && top.data && top.data.fromParks;
+  closeSheetRaw(id); navDrop(id === "detail" ? DETAIL_KEYS : [id]);
+  if (backToParks) reopenParks();   // closing an event opened from the National Parks list returns to the list (same as Back)
+}
 function openFilters() {
   openSheet("filters");
   // on phones the two sheets are exclusive, so the filters entry replaces a detail entry rather than stacking on it
-  navPush("filters", "#filters", () => closeSheetRaw("filters"), { replaceKeys: isPhone() ? DETAIL_KEYS : [] });
+  navPush("filters", "#filters", () => closeSheetRaw("filters"), { replaceKeys: isPhone() ? [...DETAIL_KEYS, "parks"] : ["parks"] });
+  document.body.classList.remove("parks-open");
 }
 
 /* ------------------------------------------------------------ map */
@@ -153,12 +170,16 @@ async function initMap(stylePromise) {
   map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: false }, trackUserLocation: false }), "bottom-right");
   map.on("style.load", () => { try { map.setProjection({ type: "globe" }); } catch (e) {} setupSky(); addLayers(); refreshAll(); });
   map.on("error", e => { const m = (e && e.error && e.error.message) || ""; if (!/Failed to fetch|NetworkError|AbortError/i.test(m)) console.warn("map error", m); });
-  map.on("render", updateDonuts);
+  map.on("render", updateDonuts); map.on("render", updateAtmoGlow);
   map.on("moveend", loadCityCells);
   wireMapEvents();
 }
 function setupSky() {
   const real = st.style !== "dark";
+  if (st.view === "atmos")   // Atmosphere view: a stronger, bluer limb glow that reads as the atmosphere shell at every zoom
+    try { map.setSky({ "sky-color": "#0a1240", "horizon-color": "#6fc3ff", "fog-color": "#0a1240", "sky-horizon-blend": 1, "horizon-fog-blend": 1, "fog-ground-blend": 0.6, "atmosphere-blend": 1 }); return; } catch (e) {}
+  if (st.view === "under")
+    try { map.setSky({ "sky-color": "#05060f", "horizon-color": "#4a2a10", "fog-color": "#05060f", "sky-horizon-blend": 0.3, "horizon-fog-blend": 0.3, "fog-ground-blend": 0.9, "atmosphere-blend": 0.35 }); return; } catch (e) {}
   try { map.setSky({ "sky-color": "#0b0f2e", "horizon-color": real ? "#4f9dff" : "#2a2470", "fog-color": "#0b0f2e", "sky-horizon-blend": 0.6, "horizon-fog-blend": 0.6, "fog-ground-blend": 0.9,
     "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0] }); } catch (e) {}
 }
@@ -371,12 +392,13 @@ function addLayers() {
   map.addLayer({ id: "spider-pts", type: "symbol", source: "spider", filter: ["!", ["has", "leg"]], layout: {
     "icon-image": ["concat", "sh-", ["match", ["get", "t"], ...TYPES.flatMap((t, i) => [i, t.id]), "other"], ["case", ["==", ["get", "c"], 1], "-c", ""]],
     "icon-size": 1.2, "icon-allow-overlap": true, "icon-ignore-placement": true } });
+  addViewLayers();
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: { "circle-radius": 14, "circle-color": "rgba(255,255,255,0.08)", "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
 }
 function refreshAll() {
   if (!map.getSource("events")) return;
   clearDonuts(); map.getSource("events").setData({ type: "FeatureCollection", features: st.mapFeats || [] });
-  renderCommunity(); renderArcs(); renderTheories(); renderWaves(); renderCtx(); renderVisitors(); renderSel();
+  renderCommunity(); renderArcs(); renderTheories(); renderWaves(); renderCtx(); renderVisitors(); renderSel(); applyViewLayers(); renderViewFeats();
 }
 
 /* ------------------------------------------------------------ data loading */
@@ -394,6 +416,9 @@ async function loadType(t) {
       feats[i] = { type: "Feature", geometry: { type: "Point", coordinates: [col.lon[i], col.lat[i]] }, properties: p };
     }
     (col.u || []).forEach(i => feats[i].properties.u = 1); (col.pm || []).forEach(i => feats[i].properties.pm = 1);
+    (col.x || []).forEach(i => feats[i].properties.x = 1);   // tombstone of an entry moved to another type (keeps ids stable; never shown)
+    if (col.h) col.h.forEach((h, i) => { if (h !== -1) feats[i].properties.h = h; });
+    (col.pi || []).forEach(i => feats[i].properties.pi = 1); (col.hi || []).forEach(i => feats[i].properties.hi = 1);
     st.pts[t] = feats; indexGrid(feats); return feats;
   })();
   return st.loading[t];
@@ -407,6 +432,7 @@ async function getDetail(id) {
   const key = `${t}/${Math.floor(n / st.manifest.files[t].chunk_size)}`;
   if (!st.detailCache[key]) st.detailCache[key] = getJSON(`data/detail/${key}.json${V}`);
   const recs = await st.detailCache[key]; const r = recs[id]; if (!r) return null;
+  if (r.moved_to && r.moved_to !== id) return getDetail(r.moved_to);
   const f = ptById(id);
   return { ...r, id, type: t, q: f ? f.properties.q : undefined, lon: f ? f.geometry.coordinates[0] : null, lat: f ? f.geometry.coordinates[1] : null };
 }
@@ -415,19 +441,21 @@ async function getDetail(id) {
 let fTimer;
 function scheduleFilter() { clearTimeout(fTimer); fTimer = setTimeout(applyFilters, 160); }
 async function applyFilters() {
-  const need = [...st.enabled].filter(t => !st.pts[t]);
+  const need = [...st.enabled].filter(t => !st.pts[t] && inView(t));
   if (need.length) await Promise.all(need.map(loadType));
   const q = st.q.trim().toLowerCase(), y0 = st.years[0] * 10000, y1 = st.years[1] * 10000 + 1231;
   const out = [], counts = Object.fromEntries(TYPES.map(t => [t.id, 0])), totals = {};
   for (const t of TYPES) {
-    const arr = st.pts[t.id]; totals[t.id] = arr ? arr.length : st.manifest.counts_by_type[t.id];
+    if (!inView(t)) continue;
+    const arr = st.pts[t.id]; totals[t.id] = st.manifest.counts_by_type[t.id];
     if (!arr) continue;
     const on = st.enabled.has(t.id), mass = t.id === "mass";
     for (const f of arr) {
-      const p = f.properties, [lo, hi] = mass || p.u ? st.uq : st.cred;
+      const p = f.properties; if (p.x) continue;
+      const [lo, hi] = mass || p.u ? st.uq : st.cred;
       if (p.s < lo || p.s > hi) continue;
       if (p.o && !st.outcomes.has(p.o)) continue;
-      if (st.m411 && !p.m) continue;
+      if (st.m411 && st.view === "earth" && !p.m) continue;
       if (p.d) { if (p.d < y0 || p.d > y1) continue; } else if (!st.undated) continue;
       if (q && !p.n.toLowerCase().includes(q)) continue;
       counts[t.id]++; if (on) out.push(f);
@@ -439,31 +467,35 @@ async function applyFilters() {
     if (s < lo || s > hi) return false; const d = c.event_date ? +String(c.event_date).replace(/-/g, "") : 0;
     if (d) { if (d < y0 || d > y1) return false; } else if (!st.undated) return false;
     if (q && !(c.title + " " + (c.description || "")).toLowerCase().includes(q)) return false;
-    if (!st.enabled.has(c.type) || st.m411) return false; cc++; return st.community_on;
+    if (!st.enabled.has(c.type) || st.m411 || st.view !== "earth") return false; cc++; return st.community_on;
   });
-  st.filtered = out; st.mapFeats = groupStacks(out); st.counts = counts; st.totals = totals; st.communityCount = cc;
+  const earth = st.view === "earth";
+  st.filtered = out; st.mapFeats = earth ? groupStacks(out) : []; st.viewFeats = earth ? [] : out; st.counts = counts; st.totals = totals; st.communityCount = cc;
   const shown = out.length + st.communityFiltered.length;
-  const all = Object.values(totals).reduce((a, b) => a + b, 0) + st.community.length;
+  const all = Object.values(totals).reduce((a, b) => a + b, 0) + (earth ? st.community.length : 0);
   $("#total-shown").textContent = fmtN(shown); $("#total-all").textContent = fmtN(all);
   $("#count-badge").textContent = shown >= 1000 ? (shown / 1000).toFixed(shown >= 1e4 ? 0 : 1) + "k" : shown;
   renderTypeList();
-  if (map && map.getSource("events")) { clearDonuts(); unspiderfy(); map.getSource("events").setData({ type: "FeatureCollection", features: st.mapFeats }); renderCommunity(); }
+  if (map && map.getSource("events")) { clearDonuts(); unspiderfy(); map.getSource("events").setData({ type: "FeatureCollection", features: st.mapFeats }); renderCommunity(); renderViewFeats(); }
 }
 function renderTypeList() {
-  const rows = TYPES.map(t => `<li><button data-type="${t.id}" aria-pressed="${st.enabled.has(t.id)}"><span class="dot">${shapeSVG(t, 16)}</span><span class="tl">${esc(t.label)}${t.sub ? `<span class="sub">${t.sub}</span>` : ""}</span><span class="tc">${st.counts ? fmtN(st.counts[t.id]) : "…"}</span></button></li>`);
-  rows.push(`<li><button data-type="community" aria-pressed="${st.community_on}"><span class="dot">${shapeSVG(null, 16, true)}</span><span class="tl">Community reports<span class="sub">${S.available === false || !S.enabled ? "Not enabled yet" : "Unreviewed, user-submitted"}</span></span><span class="tc">${fmtN(st.communityCount || 0)}</span></button></li>`);
+  const rows = TYPES.filter(inView).map(t => `<li><button data-type="${t.id}" aria-pressed="${st.enabled.has(t.id)}"><span class="dot">${shapeSVG(t, 16)}</span><span class="tl">${esc(t.label)}${t.sub ? `<span class="sub">${t.sub}</span>` : ""}</span><span class="tc">${st.counts ? fmtN(st.counts[t.id]) : "…"}</span></button></li>`);
+  if (st.view === "earth") rows.push(`<li><button data-type="community" aria-pressed="${st.community_on}"><span class="dot">${shapeSVG(null, 16, true)}</span><span class="tl">Community reports<span class="sub">${S.available === false || !S.enabled ? "Not enabled yet" : "Unreviewed, user-submitted"}</span></span><span class="tc">${fmtN(st.communityCount || 0)}</span></button></li>`);
   $("#type-list").innerHTML = rows.join("");
-  $("#uq-wrap").hidden = !st.enabled.has("mass") && !st.enabled.has("disappearance");
-  renderMissingFilters();
+  $("#uq-wrap").hidden = !["mass", "disappearance", "ug_missing"].some(k => st.enabled.has(k) && inView(k));
+  renderMissingFilters(); renderViewList(); renderLegend();
 }
 
 /* ---- missing-person filters: outcome chips + Missing 411 toggle (only records that carry these fields are affected) ---- */
 const OUTCOMES = [["a", "Found alive"], ["d", "Found deceased"], ["n", "Never found"], ["u", "Unknown"]];
 function renderMissingFilters() {
   const box = $("#missing-wrap"); if (!box) return;
-  box.hidden = !st.enabled.has("disappearance");
-  const arr = st.pts.disappearance || [], oc = { a: 0, d: 0, n: 0, u: 0 }; let m = 0;
-  for (const f of arr) { const p = f.properties; if (p.o) oc[p.o]++; if (p.m) m++; }
+  const mt = st.view === "under" ? "ug_missing" : "disappearance";
+  box.hidden = !(st.enabled.has(mt) && inView(mt));
+  $("#missing-h").textContent = mt === "ug_missing" ? "Underground disappearances: outcome" : "Missing persons: outcome";
+  $("#m411-row").hidden = mt !== "disappearance";
+  const arr = st.pts[mt] || [], oc = { a: 0, d: 0, n: 0, u: 0 }; let m = 0;
+  for (const f of arr) { const p = f.properties; if (p.x) continue; if (p.o) oc[p.o]++; if (p.m) m++; }
   $("#outcome-chips").innerHTML = OUTCOMES.map(([k, l]) => `<button type="button" class="chip oc-${k}" data-oc="${k}" aria-pressed="${st.outcomes.has(k)}">${l} <small>${fmtN(oc[k])}</small></button>`).join("");
   $("#m411-count").textContent = fmtN(m);
 }
@@ -483,28 +515,228 @@ function probableHTML(r) {
   return `<div class="probable"><b>Probable match</b> Some records here were linked to this case on a probable basis (same park and a close date), not a confirmed one. They could belong to a different person or incident.
     <ul>${r.probable.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
 }
+/* ------------------------------------------------------------ atlas5: exclusive views (Earth / Atmosphere / Underground) */
+// Atmosphere: pins are small fill-extrusion blocks floating at a compressed "visual altitude" above their ground point, with a thin tether.
+// Real altitudes are shown in the popup; the drawing is not to scale above low Earth orbit.
+const ATM = { deep: 1900, box: 4, boxH: 110, cap: 1700 };
+function visAltKm(km) { if (km == null) return ATM.deep; return km <= 600 ? km : Math.min(ATM.cap, 600 + 330 * Math.log10(km / 600)); }
+function sqPoly(lon, lat, half) { const k = half / Math.max(0.25, Math.cos(lat * Math.PI / 180)); return [[[lon - k, lat - half], [lon + k, lat - half], [lon + k, lat + half], [lon - k, lat + half], [lon - k, lat - half]]]; }
+function atmosFeats(list) {
+  const out = [];
+  for (const f of list) {
+    const p = f.properties, [lon, lat] = f.geometry.coordinates, t = TYPES[p.t], base = visAltKm(p.h) * 1000;
+    const sel = st.selected && st.selected.id === p.i;
+    out.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lon, lat, ATM.box / 2) }, properties: { i: p.i, n: p.n, k: "box", col: sel ? "#ffffff" : t.color, b: base, top: base + ATM.boxH * 1000 } });
+    out.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lon, lat, 0.22) }, properties: { i: p.i, n: p.n, k: "tether", col: t.color, b: 0, top: base } });
+  }
+  // decorative orbit rings (not data): ISS-like 51.6° inclined orbit at ~420 km and the geostationary belt (compressed, not to scale)
+  const ring = (inc, altKm, n, size, col, label) => { for (let j = 0; j < n; j++) { const u = j / n * 2 * Math.PI, la = Math.asin(Math.sin(inc * Math.PI / 180) * Math.sin(u)) * 180 / Math.PI;
+    const lo = Math.atan2(Math.cos(inc * Math.PI / 180) * Math.sin(u), Math.cos(u)) * 180 / Math.PI, b = visAltKm(altKm) * 1000;
+    out.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lo, la, size) }, properties: { k: "ring", col, b, top: b + 12000, n: label } }); } };
+  if (st.view === "atmos") { ring(51.6, 420, 140, 0.35, "#7fd7ff", "ISS-like orbit, ~420 km"); ring(0, 35786, 160, 0.35, "#c9b6ff", "Geostationary belt, 35,786 km (not to scale)"); }
+  return out;
+}
+const UG = { maxD: 13000 };
+function mixHex(a, b, f) { const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16), ch = (x, s) => (x >> s) & 255; return "#" + [16, 8, 0].map(s => Math.round(ch(pa, s) * (1 - f) + ch(pb, s) * f).toString(16).padStart(2, "0")).join(""); }
+function depthFrac(p) { return p.h == null || p.hi ? 0.45 : Math.min(1, Math.log10(1 + p.h) / Math.log10(UG.maxD)); }
+function underFeats(list) {
+  return list.map(f => { const p = f.properties, t = TYPES[p.t], d = depthFrac(p);
+    const lbl = p.h != null ? "\u2212" + fmtN(p.h) + " m" + (p.hi ? " (illustrative)" : "") : "depth illustrative";
+    return { type: "Feature", geometry: f.geometry, properties: { i: p.i, n: p.n, t: p.t, col: mixHex(t.color, "#1a0d05", d * 0.6), halo: t.color, r: 10 + d * 20, lbl, ill: p.h == null || p.hi ? 1 : 0, c: p.c || 0 } }; });
+}
+function addViewLayers() {
+  const empty = { type: "FeatureCollection", features: [] };
+  ["atmos", "atmos-ground", "under"].forEach(id => map.addSource(id, { type: "geojson", data: empty }));
+  // surface dimmer: a world polygon under borders and labels (Atmosphere: slightly dimmed; Underground: darkened "cut-away" ground)
+  map.addSource("dim", { type: "geojson", data: { type: "Feature", geometry: { type: "Polygon", coordinates: [[[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]]] }, properties: {} } });
+  const firstLabel = (map.getStyle().layers.find(l => /^boundary|^label|^water_name|^place/.test(l.id) || l.type === "symbol") || {}).id;
+  map.addLayer({ id: "view-dim", type: "fill", source: "dim", layout: { visibility: "none" }, paint: { "fill-color": "#05060f", "fill-opacity": 0.6, "fill-antialias": false } }, firstLabel && map.getLayer(firstLabel) ? firstLabel : undefined);
+  map.addLayer({ id: "atmos-ground", type: "circle", source: "atmos-ground", paint: { "circle-radius": 4, "circle-color": ["get", "col"], "circle-stroke-color": "#fff", "circle-stroke-width": 1, "circle-opacity": 0.85 } });
+  map.addLayer({ id: "atmos-x", type: "fill-extrusion", source: "atmos", paint: { "fill-extrusion-color": ["get", "col"], "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "top"], "fill-extrusion-opacity": 0.92, "fill-extrusion-vertical-gradient": true } });
+  map.addLayer({ id: "under-halo", type: "circle", source: "under", paint: { "circle-radius": ["get", "r"], "circle-color": ["get", "halo"], "circle-opacity": 0.16, "circle-blur": 0.35, "circle-stroke-color": ["get", "halo"], "circle-stroke-width": 1.2, "circle-stroke-opacity": ["case", ["==", ["get", "ill"], 1], 0.35, 0.8] } });
+  map.addLayer({ id: "under-core", type: "symbol", source: "under", layout: {
+    "icon-image": ["concat", "sh-", ["match", ["get", "t"], ...TYPES.flatMap((t, i) => [i, t.id]), "other"], ["case", ["==", ["get", "c"], 1], "-c", ""]], "icon-size": 0.9, "icon-allow-overlap": true, "icon-ignore-placement": true,
+    "text-field": ["get", "lbl"], "text-font": C.FONT, "text-size": 10.5, "text-offset": [0, 1.7], "text-anchor": "top", "text-optional": true },
+    paint: { "icon-opacity": 1, "text-color": "#ffd9a8", "text-halo-color": "#120a04", "text-halo-width": 1.3 } });
+}
+function applyViewLayers() {
+  if (!map || !map.getLayer("view-dim")) return;
+  const v = st.view, vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+  vis("view-dim", v !== "earth"); map.setPaintProperty("view-dim", "fill-opacity", v === "under" ? 0.62 : 0.28);
+  ["atmos-x", "atmos-ground"].forEach(id => vis(id, v === "atmos")); ["under-halo", "under-core"].forEach(id => vis(id, v === "under"));
+  ["ctx-pts", "ctx-lbl", "visitors", "waves", "theories", "theories-lbl", "community", "arcs", "arcs-case", "arcs-hit"].forEach(id => vis(id, v === "earth"));
+  setupSky();
+}
+function renderViewFeats() {
+  if (!map || !map.getSource("atmos")) return;
+  const list = st.viewFeats || [];
+  map.getSource("atmos").setData({ type: "FeatureCollection", features: st.view === "atmos" ? atmosFeats(list) : [] });
+  map.getSource("atmos-ground").setData({ type: "FeatureCollection", features: st.view === "atmos" ? list.filter(f => !f.properties.pi).map(f => ({ type: "Feature", geometry: f.geometry, properties: { i: f.properties.i, n: f.properties.n, col: TYPES[f.properties.t].color } })) : [] });
+  map.getSource("under").setData({ type: "FeatureCollection", features: st.view === "under" ? underFeats(list) : [] });
+}
+// Atmosphere glow: a soft shell drawn around the globe's limb (decorative; the thin Kármán line at 100 km would be invisible at this scale)
+function updateAtmoGlow() {
+  const g = $("#atmo-glow"); if (!g || !map) return;
+  if (st.view !== "atmos" || map.getPitch() > 8) { g.hidden = true; return; }
+  const c = map.getCenter(), p0 = map.project(c), la = c.lat > 0 ? c.lat - 60 : c.lat + 60, p1 = map.project([c.lng, la]);
+  const R = Math.hypot(p1.x - p0.x, p1.y - p0.y) / Math.sin(60 * Math.PI / 180); if (!isFinite(R) || R < 5) { g.hidden = true; return; }
+  g.hidden = false; const D = R * 2 * 1.32;
+  Object.assign(g.style, { width: D + "px", height: D + "px", left: (p0.x - D / 2) + "px", top: (p0.y - D / 2) + "px" }); g.style.setProperty("--r", (R / (D / 2) * 100).toFixed(2) + "%");
+}
+function renderViewList() {   // a tappable list of the view's pins (the 3D blocks are small on phones)
+  const box = $("#view-list-wrap"); if (!box) return;
+  box.hidden = st.view === "earth"; if (box.hidden) return;
+  const list = (st.viewFeats || []).slice().sort((a, b) => (b.properties.h ?? -2) - (a.properties.h ?? -2));
+  $("#view-list-h").textContent = st.view === "atmos" ? "Space items (highest first)" : "Underground pins (deepest first)";
+  $("#view-list").innerHTML = list.map(f => { const p = f.properties, t = TYPES[p.t];
+    const hl = st.view === "atmos" ? (p.h != null ? fmtN(p.h) + " km" : "deep space") : (p.h != null ? "\u2212" + fmtN(p.h) + " m" : "depth n/a");
+    return `<li><button type="button" data-id="${esc(p.i)}">${shapeSVG(t, 13)}<span>${esc(p.n)}</span><small>${hl}${p.pi ? " · illustrative position" : ""}</small></button></li>`; }).join("") || `<li class="hint">Nothing matches the current filters.</li>`;
+}
+function renderLegend() {
+  const el = $("#legend-chip"); if (!el) return;
+  const ts = TYPES.filter(t => inView(t) && t.id !== "mass");
+  el.innerHTML = ts.map(t => `<span>${shapeSVG(t, 12)}${esc(t.label.replace(" sighting", "").replace(" (unexplained)", ""))}</span>`).join("")
+    + (st.view === "earth" ? `<span>${shapeSVG(null, 12, true)}Community</span>` : st.view === "atmos" ? `<span class="lg-note">Heights compressed, not to scale</span>` : `<span class="lg-note">Darker pin + wider ring = deeper</span>`);
+}
+
+/* ------------------------------------------------------------ National Parks list (Earth view only)
+   Built from data/np-index.json (scripts/build_np_index.py): one row per np-missing case, grouped by park.
+   Groups are collapsed; only expanded groups render rows, so the phone never builds 2,600 DOM rows at once. */
+const NP_Y0 = 1900, NP_Y1 = new Date().getFullYear();
+const NPS = { idx: null, loading: null, q: "", y: [NP_Y0, NP_Y1], oc: new Set(["a", "d", "n", "u"]), m411: false, open: new Set(), auto: true, scroll: 0, state: null, view: [] };
+const NP_OC = { a: "Found alive", d: "Found deceased", n: "Never found", u: "Unknown" };
+async function loadNP() { if (NPS.idx) return NPS.idx; if (!NPS.loading) NPS.loading = getJSON(`data/np-index.json${V}`).then(d => { NPS.idx = d; return d; }); return NPS.loading; }
+async function openParks(opts = {}) {
+  if (st.view !== "earth") return;
+  const el = $("#parks");
+  if ($("#filters").dataset.state !== "closed") closeSheetRaw("filters");
+  openSheet("parks", isPhone() ? "full" : "open"); document.body.classList.add("parks-open");
+  if (!opts.noNav) navPush("parks", "#parks", () => closeSheetRaw("parks"), { replaceKeys: isPhone() ? ["filters", ...DETAIL_KEYS] : ["filters"] });
+  if (!NPS.idx) { $("#np-list").innerHTML = `<li class="hint">Loading the park list…</li>`; try { await loadNP(); } catch (e) { $("#np-list").innerHTML = `<li class="hint">Couldn't load the park list.</li>`; return; } renderNPChips(); }
+  renderNP();
+}
+function reopenParks() {   // Back from an event opened from the list: show the list again where it was
+  if (st.view !== "earth") return;
+  const el = $("#parks"); el.dataset.state = NPS.state || (isPhone() ? "full" : "open"); document.body.classList.add("parks-open");
+  if (isPhone()) for (const o of ["filters", "detail"]) $("#" + o).dataset.state = "closed";
+  const b = el.querySelector(".panel-body"); requestAnimationFrame(() => { b.scrollTop = NPS.scroll; });
+}
+function npFilter() {
+  const d = NPS.idx, q = NPS.q.trim().toLowerCase(), [y0, y1] = NPS.y, groups = new Map();
+  const pm = d.parks.map(p => !q || (p[1] + " " + p[0] + " " + p[2]).toLowerCase().includes(q));
+  let n = 0;
+  for (const r of d.rows) {
+    if (!pm[r[1]]) continue; const y = +r[2].slice(0, 4);
+    if (y < y0 || y > y1 || !NPS.oc.has(r[4]) || (NPS.m411 && !r[5])) continue;
+    let g = groups.get(r[1]); if (!g) groups.set(r[1], g = []); g.push(r); n++;
+  }
+  const list = [...groups.entries()].sort((a, b) => b[1].length - a[1].length || d.parks[a[0]][1].localeCompare(d.parks[b[0]][1]));
+  return { list, cases: n, parks: list.length };
+}
+function npRowHTML(r) {
+  const d = NPS.idx, src = d.sources[r[6]] || ["", ""], id = d.type + "-" + r[0];
+  const name = r[3] ? esc(r[3]) : `<i class="np-unnamed">Name not published</i>`;
+  return `<li class="np-row"><button type="button" class="np-main" data-id="${id}"><span class="np-d">${esc(fmtDate(r[2]))}</span><span class="np-n">${name}</span>`
+    + `<span class="np-tags"><span class="oc-t oc-${r[4]}">${NP_OC[r[4]]}</span>${r[5] ? `<span class="badge m411b" title="${r[5] === 2 ? "Missing 411 tag (low-confidence match)" : "Listed in a Missing 411 index"}">Missing 411${r[5] === 2 ? "?" : ""}</span>` : ""}</span></button>`
+    + (src[1] ? `<a class="np-src" href="${esc(src[1])}" target="_blank" rel="noopener noreferrer" title="${esc(src[0])}" aria-label="Source: ${esc(src[0])} (opens in a new tab)">Source ↗</a>` : "") + `</li>`;
+}
+function renderNP() {
+  if (!NPS.idx) return;
+  const { list, cases, parks } = npFilter(), d = NPS.idx;
+  $("#np-count").innerHTML = `<b>${fmtN(cases)}</b> case${cases === 1 ? "" : "s"} in <b>${fmtN(parks)}</b> park${parks === 1 ? "" : "s"}`;
+  $("#np-yr-out").textContent = `${NPS.y[0]}–${NPS.y[1]}`;
+  const autoOpen = cases <= 40 || parks <= 2;
+  NPS.view = list;
+  $("#np-list").innerHTML = list.map(([pi, rows]) => {
+    const p = d.parks[pi], open = NPS.open.has(pi) || autoOpen;
+    return `<li class="np-park${open ? " open" : ""}"><button type="button" class="np-ph" data-park="${pi}" aria-expanded="${open}"><span class="np-pn">${esc(p[1])}</span><small>${esc(p[2])}</small><b class="np-pc">${fmtN(rows.length)}</b><span class="np-chev" aria-hidden="true">▸</span></button>`
+      + (open ? `<ul class="np-rows">${rows.map(npRowHTML).join("")}</ul>` : "") + `</li>`;
+  }).join("") || `<li class="hint">No park cases match these filters.</li>`;
+}
+function renderNPChips() {
+  const d = NPS.idx, oc = { a: 0, d: 0, n: 0, u: 0 }; let m = 0;
+  for (const r of d.rows) { oc[r[4]]++; if (r[5]) m++; }
+  $("#np-oc").innerHTML = Object.entries(NP_OC).map(([k, l]) => `<button type="button" class="chip oc-${k}" data-oc="${k}" aria-pressed="${NPS.oc.has(k)}">${l} <small>${fmtN(oc[k])}</small></button>`).join("");
+  $("#np-m411-n").textContent = fmtN(m);
+}
+function wireParks() {
+  $("#btn-parks").onclick = () => $("#parks").dataset.state === "closed" ? openParks() : closeSheet("parks");
+  let qT; $("#np-q").oninput = e => { clearTimeout(qT); qT = setTimeout(() => { NPS.q = e.target.value; renderNP(); }, 120); };
+  const [a, b] = $$("#np-years input"); a.min = b.min = NP_Y0; a.max = b.max = NP_Y1; a.value = NP_Y0; b.value = NP_Y1;
+  const yr = () => { let x = +a.value, y = +b.value; if (x > y) [x, y] = [y, x]; NPS.y = [x, y]; $("#np-yr-out").textContent = `${x}–${y}`; clearTimeout(yr._t); yr._t = setTimeout(renderNP, 120); };
+  a.oninput = b.oninput = yr;
+  $("#np-oc").onclick = e => { const c = e.target.closest("[data-oc]"); if (!c) return; const k = c.dataset.oc; NPS.oc.has(k) ? NPS.oc.delete(k) : NPS.oc.add(k); c.setAttribute("aria-pressed", NPS.oc.has(k)); renderNP(); };
+  $("#np-m411").onchange = e => { NPS.m411 = e.target.checked; renderNP(); };
+  $("#np-reset").onclick = () => { NPS.q = ""; $("#np-q").value = ""; NPS.oc = new Set(["a", "d", "n", "u"]); NPS.m411 = false; $("#np-m411").checked = false; a.value = NP_Y0; b.value = NP_Y1; NPS.y = [NP_Y0, NP_Y1]; NPS.open.clear(); renderNPChips(); renderNP(); };
+  $("#np-list").onclick = e => {
+    if (e.target.closest("a")) return;   // source link: opens in a new tab, never selects the row
+    const h = e.target.closest("button[data-park]");
+    if (h) { const pi = +h.dataset.park; NPS.open.has(pi) ? NPS.open.delete(pi) : NPS.open.add(pi); const li = h.parentElement, open = !li.classList.contains("open");
+      li.classList.toggle("open", open); h.setAttribute("aria-expanded", open); const ul = li.querySelector(".np-rows");
+      if (open && !ul) { const g = NPS.view.find(x => x[0] === pi); li.insertAdjacentHTML("beforeend", `<ul class="np-rows">${(g ? g[1] : []).map(npRowHTML).join("")}</ul>`); } else if (!open && ul) ul.remove(); return; }
+    const r = e.target.closest("button[data-id]"); if (!r) return;
+    const el = $("#parks"); NPS.state = el.dataset.state; NPS.scroll = el.querySelector(".panel-body").scrollTop;
+    if (!st.enabled.has("disappearance")) { st.enabled.add("disappearance"); applyFilters(); }
+    selectEvent(r.dataset.id, { fly: true, zoom: 9 });
+  };
+}
+function placeViewSeg() { const tb = $("#topbar"), vs = $("#view-seg"), pb = $("#btn-parks"); if (tb && vs) vs.style.top = Math.round(tb.getBoundingClientRect().bottom + 4) + "px";
+  if (pb && vs) pb.style.top = Math.round(isPhone() ? vs.getBoundingClientRect().bottom + 8 : tb.getBoundingClientRect().bottom + 4) + "px"; }
+addEventListener("resize", () => placeViewSeg());
+function syncViewSeg() { placeViewSeg(); $$("#view-seg button").forEach(b => { const on = b.dataset.view === st.view; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); }); document.body.dataset.view = st.view; }
+let earthCam = null;
+async function setView(v, opts = {}) {
+  if (!VIEWS[v] || v === st.view) return;
+  const prev = st.view;
+  if (prev === "earth" && map) earthCam = { center: map.getCenter(), zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() };
+  if (!opts.keepDetail && $("#detail").dataset.state !== "closed") closeSheet("detail");
+  if (v !== "earth" && $("#parks").dataset.state !== "closed") closeSheet("parks");   // National Parks list is an Earth-view feature
+  unspiderfy && map && unspiderfy(); st.selected = null; st.arcs = [];
+  st.view = v; syncViewSeg();
+  if (!opts.noNav) {
+    if (v === "earth") { const top = navTop(); if (top && top.key === "view") navDrop("view"); else NAV.stack.forEach(e => { if (e.key === "view") e.close = () => {}; }); }
+    else navPush("view", "#view=" + v, () => setView("earth", { noNav: true }), { replaceKeys: ["view"] });
+  }
+  await Promise.all(TYPES.filter(t => t.view === v && st.enabled.has(t.id)).map(t => loadType(t.id)));
+  await applyFilters(); applyViewLayers(); renderArcs(); if (map && map.getSource("sel")) renderSel(); updateAtmoGlow();
+  if (map && !opts.noCam) {
+    if (v === "atmos") map.easeTo({ zoom: Math.min(map.getZoom(), isPhone() ? 0.75 : 1.35), pitch: 0, duration: 1400 });
+    else if (v === "under") map.easeTo({ zoom: Math.min(map.getZoom(), isPhone() ? 1.1 : 1.8), pitch: 0, duration: 1200 });
+    else if (earthCam) map.easeTo({ ...earthCam, duration: 1200 });
+  }
+  if (!opts.quiet) toast(v === "atmos" ? "Atmosphere view: space and orbital anomalies, floating at a compressed altitude" : v === "under" ? "Underground view: caves, mines, tunnels and deep holes" : "Earth view");
+}
+
 /* ------------------------------------------------------------ selection + detail */
 function clearSelection() {
   st.selected = null; st.arcs = [];
-  if (map && map.getSource("sel")) { renderSel(); renderArcs(); }
+  if (map && map.getSource("sel")) { renderSel(); renderArcs(); if (st.view === "atmos") renderViewFeats(); }
 
 }
 function renderSel() { const s = st.selected; map.getSource("sel").setData({ type: "FeatureCollection", features: s && s.lon != null ? [{ type: "Feature", geometry: { type: "Point", coordinates: [s.lon, s.lat] }, properties: {} }] : [] }); }
 async function selectEvent(id, opts = {}) {
+  id = (st.manifest.aliases || {})[id] || id;
   if (st.mode === "link" && st.linkA && id !== st.linkA.id) { const b = await getDetail(id); if (b) return openTheoryForm(st.linkA, b); }
-  let r; try { r = await getDetail(id); } catch (e) { toast("Couldn't load details."); return; }
+  let r; try { await loadType(splitId(id)[0]).catch(() => {}); r = await getDetail(id); } catch (e) { toast("Couldn't load details."); return; }
   if (!r) { toast("Event not found."); return; }
+  const tv = (TYPES[TI[r.type]] || {}).view || "earth";
+  if (tv !== st.view && !r.community) { if (st.mode === "link") setMode(null); await setView(tv, { noCam: !!opts.fly, quiet: true }); }
   st.selected = r; renderSel(); renderDetail(r); openSheet("detail");
   if (!opts.noNav) {
     const top = navTop(), list = top && top.key === "list" ? top.data : null;
-    navPush("event", "#event=" + encodeURIComponent(id), list ? () => renderStackList(list, { noNav: true }) : () => closeSheetRaw("detail"),
-      { replaceKeys: isPhone() ? ["filters"] : [] });
+    const fromParks = !list && top && (top.key === "parks" || (top.key === "event" && top.data && top.data.fromParks));
+    navPush("event", "#event=" + encodeURIComponent(id), list ? () => renderStackList(list, { noNav: true }) : fromParks ? () => { closeSheetRaw("detail"); reopenParks(); } : () => closeSheetRaw("detail"),
+      { replaceKeys: isPhone() ? ["filters"] : [], data: fromParks ? { fromParks: true } : undefined });
   }
-  if (opts.fly && r.lon != null) map.flyTo({ center: [r.lon, r.lat], zoom: Math.max(map.getZoom(), opts.zoom || 7), speed: 1.4, padding: flyPad() });
+  if (opts.fly && r.lon != null) {
+    if (st.view === "earth") map.flyTo({ center: [r.lon, r.lat], zoom: Math.max(map.getZoom(), opts.zoom || 7), speed: 1.4, padding: flyPad() });
+    else map.flyTo({ center: [r.lon, r.lat], zoom: st.view === "atmos" ? (isPhone() ? 0.8 : 1.5) : (isPhone() ? 2.2 : 3), pitch: 0, speed: 1.2, padding: flyPad() });
+  }
+  if (st.view === "atmos") renderViewFeats();   // highlight the selected block
   computeArcs(r); renderArcs(); renderDetailLinks(r);
   ensureCtx().then(() => renderPattern(r)).catch(() => {});
 }
-function flyPad() { return isPhone() ? { bottom: innerHeight * 0.45, top: 60, left: 0, right: 0 } : { right: 420, left: $("#filters").dataset.state !== "closed" ? 350 : 0, top: 60, bottom: 30 }; }
+function flyPad() { return isPhone() ? { bottom: innerHeight * 0.45, top: 60, left: 0, right: 0 } : { right: 420, left: ($("#filters").dataset.state !== "closed" || $("#parks").dataset.state !== "closed") ? 390 : 0, top: 60, bottom: 30 }; }
 function scoreHTML(sc) {
   const uq = sc.kind === "unanswered";
   const rows = (sc.breakdown || []).map(b => Array.isArray(b) ? b : [b.label, b.pts]).map(([l, p]) => {
@@ -529,6 +761,21 @@ function rumorsHTML(r) {
      <div class="src-l">Reported in: <a href="${esc(x.source.url)}" target="_blank" rel="noopener">${esc(x.source.label)}</a></div>
      ${x.finding ? `<div class="finding"><b>What investigators found</b>${esc(x.finding)}<div class="src-l">${(x.finding_source || []).map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.label)}</a>`).join(" · ")}</div></div>` : ""}</div>`; }).join("")}</details>`;
 }
+function heightHTML(r) {
+  const out = [];
+  if (r.type === "space") {
+    const alt = r.alt_label || (r.alt_km != null ? `About ${fmtN(r.alt_km)} km` : "Beyond Earth orbit");
+    out.push(`<div class="sec hblock"><h4>Altitude / orbit</h4><p>${esc(alt)}${r.alt_approx ? " <small>(approximate)</small>" : ""}</p><p class="hint">In the Atmosphere view, pins float at a compressed altitude: low orbits are roughly to scale; higher orbits and deep space are not to scale.</p></div>`);
+    out.push(r.pos_illustrative ? `<div class="approx">📍 Position is illustrative: this event has no fixed ground location, so the pin is placed for display only.</div>`
+      : `<div class="approx ok">📍 The pin floats above its ground location: ${esc(r.place || "")}.</div>`);
+  }
+  if (r.type === "ug_anomaly" || r.type === "ug_missing") {
+    const d = r.depth_label || (r.depth_m != null ? `About ${fmtN(r.depth_m)} m below the surface` : "Depth not recorded in the sources");
+    out.push(`<div class="sec hblock ug"><h4>Depth</h4><p>${esc(d)}</p>${r.depth_illustrative || r.depth_m == null ? `<p class="hint">Depth shown on the pin is illustrative, not a measured figure.</p>` : ""}</div>`);
+  }
+  if (r.also_listed) out.push(`<div class="approx ok">Also listed in the Earth view as an NPS missing-person record. <button type="button" class="linkbtn" data-goto="${esc(r.also_listed)}">Open it</button></div>`);
+  return out.join("");
+}
 function renderDetail(r) {
   const t = TYPES[TI[r.type]] || TYPES[7];
   $("#detail-kicker").innerHTML = `<span class="badge" style="border:1px solid ${t.color}66">${shapeSVG(t, 13)}${esc(t.label)}</span>` + (r.community ? `<span class="badge unrev">Unreviewed community report</span>` : r.src === "curated" ? `<span class="badge cur">Curated case</span>` : r.src === "np-missing" ? `<span class="badge nps">NPS missing-person record</span>` : "")
@@ -540,17 +787,19 @@ function renderDetail(r) {
   const lic = r.license || (gen && gen.license) || "";
   $("#detail-body").innerHTML = `<h2 class="d-title">${esc(r.title)}</h2>
    <div class="d-meta">📅 ${esc(fmtDate(r.date))}${r.time ? " " + esc(r.time) : ""} · 📍 ${esc(r.place || "")}</div>${precNote(r.q) ? `<div class="approx">⚠️ ${precNote(r.q)}</div>` : ""}
-   ${outcomeHTML(r.outcome)}${imgs}<p>${esc(r.summary || "")}</p>${probableHTML(r)}${r.link_confidence === "low" ? `<div class="approx">Park connection: low confidence. The source ties this case to the park only loosely (for example, a vehicle or item found there).</div>` : ""}${scoreHTML(r.score)}${m411HTML(r.missing411)}
+   ${heightHTML(r)}${outcomeHTML(r.outcome)}${imgs}<p>${esc(r.summary || "")}</p>${probableHTML(r)}${r.link_confidence === "low" ? `<div class="approx">Park connection: low confidence. The source ties this case to the park only loosely (for example, a vehicle or item found there).</div>` : ""}${scoreHTML(r.score)}${m411HTML(r.missing411)}
    ${ex ? `<div class="sec"><h4>Witness statements</h4>${ex}</div>` : ""}
    ${(r.evidence || []).length ? `<div class="sec"><h4>Evidence notes</h4><ul class="ev">${r.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
    ${r.photo ? `<figure class="img-fig"><img loading="lazy" src="${esc(r.photo)}" alt="Submitted photo"><figcaption>Photo submitted with this unreviewed report</figcaption></figure>` : ""}
    <div class="sec"><h4>Sources</h4><ul class="src">${srcs.map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.label)}</a></li>`).join("") || "<li>No source links.</li>"}</ul>${lic ? `<p class="hint">License: ${esc(lic)}</p>` : ""}${!(r.images || []).length && !r.community ? `<p class="hint">Images appear only when public domain or openly licensed; otherwise follow the source links.</p>` : ""}</div>
    ${rumorsHTML(r)}<div id="pattern"></div>
-   <div class="sec"><h4>Connections <small style="text-transform:none;letter-spacing:0">(within ${st.days} days &amp; ${st.km} km)</small></h4><div id="d-links"><p class="hint">Computing…</p></div></div>
-   <div class="d-actions"><button class="btn ghost small" id="d-zoom">🔍 Zoom to street level</button><button class="btn ghost small" id="d-theory">💭 Draw a theory line</button><button class="btn ghost small" id="d-share">🔗 Share</button></div>`;
+   ${t.view === "earth" ? `<div class="sec"><h4>Connections <small style="text-transform:none;letter-spacing:0">(within ${st.days} days &amp; ${st.km} km)</small></h4><div id="d-links"><p class="hint">Computing…</p></div></div>`
+     : `<div class="sec"><h4>Connections</h4><p class="hint">Connections are computed in the Earth view only.</p></div>`}
+   <div class="d-actions">${t.view === "earth" ? `<button class="btn ghost small" id="d-zoom">🔍 Zoom to street level</button><button class="btn ghost small" id="d-theory">💭 Draw a theory line</button>` : ""}<button class="btn ghost small" id="d-share">🔗 Share</button></div>`;
   $("#detail-body").scrollTop = 0;
-  $("#d-zoom").onclick = () => r.lon != null && map.flyTo({ center: [r.lon, r.lat], zoom: 15, speed: 1.2, padding: flyPad() });
-  $("#d-theory").onclick = () => startLinkMode(r);
+  if ($("#d-zoom")) $("#d-zoom").onclick = () => r.lon != null && map.flyTo({ center: [r.lon, r.lat], zoom: 15, speed: 1.2, padding: flyPad() });
+  if ($("#d-theory")) $("#d-theory").onclick = () => startLinkMode(r);
+  $$("#detail-body [data-goto]").forEach(b => b.onclick = () => selectEvent(b.dataset.goto, { fly: true }));
   $("#d-share").onclick = () => { const u = shareURL(r.id); if (navigator.share && isPhone()) navigator.share({ title: r.title, url: u }).catch(() => {}); else if (navigator.clipboard) navigator.clipboard.writeText(u).then(() => toast("Link copied")); };
 }
 
@@ -558,7 +807,7 @@ function renderDetail(r) {
 function kwList(mask) { const k = st.manifest.keywords, o = []; for (let i = 0; i < k.length; i++) if (mask & (1 << i)) o.push(k[i]); return o; }
 function computeArcs(r) {
   st.arcs = [];
-  if (!st.autoconnect || r.lon == null) return;
+  if (!st.autoconnect || r.lon == null || st.view !== "earth") return;
   const sel = r.community ? null : ptById(r.id);
   const sp = sel ? sel.properties : { d: r.date ? +String(r.date).replace(/-/g, "") : 0, k: 0, t: TI[r.type] };
   const ord = dToOrd(sp.d), N = st.days, X = st.km, lat = r.lat, lon = r.lon;
@@ -783,8 +1032,8 @@ let geoLast = 0;
 async function doSearch(q) {
   const box = $("#search-results"); q = q.trim(); if (!q) { hideSearch(); return; }
   const ql = q.toLowerCase(), hits = [];
-  for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr) continue; for (const f of arr) if (f.properties.c && f.properties.n.toLowerCase().includes(ql)) hits.push(f); }
-  for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr || hits.length >= 8) continue; for (const f of arr) { if (!f.properties.c && f.properties.n.toLowerCase().includes(ql)) { hits.push(f); if (hits.length >= 8) break; } } }
+  for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr) continue; for (const f of arr) if (f.properties.c && !f.properties.x && f.properties.n.toLowerCase().includes(ql)) hits.push(f); }
+  for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr || hits.length >= 8) continue; for (const f of arr) { if (!f.properties.c && !f.properties.x && f.properties.n.toLowerCase().includes(ql)) { hits.push(f); if (hits.length >= 8) break; } } }
   let html = hits.length ? `<div class="sr-h">Events</div>` + hits.slice(0, 8).map(f => `<button type="button" data-id="${esc(f.properties.i)}">${shapeSVG(TYPES[f.properties.t], 12)} ${esc(f.properties.n)}</button>`).join("") : "";
   html += `<div class="sr-h">Fly to a place</div><div id="sr-places"><button type="button" disabled>Searching places…</button></div>`;
   box.innerHTML = html; if (box.hidden) { box.hidden = false; navPush("search", "#search", () => { box.hidden = true; }); }
@@ -885,7 +1134,7 @@ function wireUI() {
   $("#conn-days").oninput = e => { st.days = +e.target.value; $("#conn-days-out").textContent = st.days + (st.days === 1 ? " day" : " days"); clearTimeout(reconn._t); reconn._t = setTimeout(reconn, 150); };
   $("#conn-km").oninput = e => { st.km = +e.target.value; $("#conn-km-out").textContent = st.km + " km"; clearTimeout(reconn._t); reconn._t = setTimeout(reconn, 150); };
   $("#btn-reset").onclick = () => {
-    st.enabled = new Set(TYPES.filter(t => t.id !== "mass").map(t => t.id)); st.community_on = true; st.q = ""; $("#q").value = ""; st.undated = true; $("#chk-undated").checked = true;
+    st.enabled = new Set(TYPES.filter(t => t.id !== "mass").map(t => t.id)); st.community_on = true; st.m411 = false; $("#m411-toggle").checked = false; st.outcomes = new Set(["a", "d", "n", "u"]); st.q = ""; $("#q").value = ""; st.undated = true; $("#chk-undated").checked = true;
     [["cred-range", 0, 100], ["uq-range", 0, 100], ["date-range", 1000, 2026]].forEach(([id, a, b]) => { const [x, y] = $$(`#${id} input`); x.value = a; y.value = b; x.oninput(); });
   };
   $("#btn-connections").onclick = () => { st.connections = !st.connections; syncConnBtn(); renderWaves(); renderTheories(); renderArcs(); toast(st.connections ? "Connections on: report waves (yellow rings), curated links and community theories" : "Connections off"); };
@@ -895,16 +1144,20 @@ function wireUI() {
   document.addEventListener("click", e => { if (!e.target.closest("#more-menu") && !e.target.closest("#btn-more")) hideMenu(); if (!e.target.closest("#search-form")) hideSearch(); });
   $("#style-seg").innerHTML = Object.entries(C.STYLES).map(([k, s]) => `<button type="button" data-style="${k}" class="${k === st.style ? "on" : ""}">${s.label}</button>`).join("");
   $("#style-seg").onclick = e => { const b = e.target.closest("button[data-style]"); if (!b || b.dataset.style === st.style) return; st.style = b.dataset.style; $$("#style-seg button").forEach(x => x.classList.toggle("on", x === b)); clearDonuts(); styleFor(st.style).then(sty => map.setStyle(sty)); };
+  syncViewSeg();
   $$("[data-ctx]").forEach(c => c.onchange = () => { c.checked ? st.ctxOn.add(c.dataset.ctx) : st.ctxOn.delete(c.dataset.ctx); renderCtx(); });
   $("#chk-visitors").onchange = e => { st.visitorsOn = e.target.checked; renderVisitors(); };
   $("#btn-visitors").onclick = () => { hideMenu(); openVisitors(); };
   $("#btn-about").onclick = $("#foot-about").onclick = e => { e.preventDefault(); hideMenu(); openAbout(); };
   $("#btn-admin").onclick = () => { hideMenu(); openAdmin(); };
   $("#modal-x").onclick = closeModal; $("#modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
-  document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#modal").hidden) closeModal(); else if (st.mode) setMode(null); else closeSheet("detail"); } });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#modal").hidden) closeModal(); else if (st.mode) setMode(null); else if ($("#detail").dataset.state !== "closed") closeSheet("detail"); else if ($("#parks").dataset.state !== "closed") closeSheet("parks"); } });
   let sT; $("#search").oninput = e => { clearTimeout(sT); const v = e.target.value; sT = setTimeout(() => v.length >= 3 && doSearch(v), 900); };
   $("#search-form").onsubmit = e => { e.preventDefault(); clearTimeout(sT); doSearch($("#search").value); };
-  $("#legend-chip").innerHTML = TYPES.filter(t => t.id !== "mass").map(t => `<span>${shapeSVG(t, 12)}${esc(t.label.replace(" sighting", "").replace(" (unexplained)", ""))}</span>`).join("") + `<span>${shapeSVG(null, 12, true)}Community</span>`;
+  renderLegend();
+  $("#view-seg").onclick = e => { const b = e.target.closest("button[data-view]"); if (b) setView(b.dataset.view); };
+  $("#view-list").onclick = e => { const b = e.target.closest("button[data-id]"); if (b) selectEvent(b.dataset.id, { fly: true }); };
+  wireParks();
   wireSheets();
 }
 function wireSheets() {   // drag handle for phone bottom sheets
@@ -928,6 +1181,10 @@ function wireMapEvents() {
   map.on("click", e => { if (!was() && st.spider) setTimeout(() => { if (!was()) unspiderfy(); }, 0); });
   ["zoomstart", "rotatestart", "pitchstart"].forEach(ev => map.on(ev, () => unspiderfy()));
   map.on("click", "community", e => { mark(); selectEvent(e.features[0].properties.id); });
+  map.on("click", "atmos-x", e => { if (was()) return; const f = e.features.find(x => x.properties.i); if (!f) { const r = e.features[0]; if (r && r.properties.n) { mark(); popup.setLngLat(e.lngLat).setHTML(`<div class="why">${esc(r.properties.n)}</div>`).addTo(map); setTimeout(() => popup.remove(), 4000); } return; } mark(); selectEvent(f.properties.i); });
+  map.on("click", "atmos-ground", e => { if (was()) return; mark(); selectEvent(e.features[0].properties.i); });
+  map.on("click", "under-core", e => { if (was()) return; mark(); selectEvent(e.features[0].properties.i); });
+  map.on("click", "under-halo", e => { if (was()) return; mark(); selectEvent(e.features[0].properties.i); });
   map.on("click", "clusters", async e => {
     if (was()) return; mark(); const f = e.features[0];
     try { const z = await map.getSource("events").getClusterExpansionZoom(f.properties.cluster_id); map.easeTo({ center: f.geometry.coordinates, zoom: Math.min(z + 0.3, 18), duration: 900 }); } catch (er) {}
@@ -941,7 +1198,7 @@ function wireMapEvents() {
   map.on("click", "arcs-hit", e => { if (was()) return; mark(); hoverWhy(e, "Why linked:"); setTimeout(() => popup.remove(), 6000); });
   map.on("click", "theories-hit", e => { if (was()) return; mark(); hoverWhy(e, "💭 Community theory, speculation:"); setTimeout(() => popup.remove(), 8000); });
   map.on("click", "ctx-pts", e => { if (was()) return; mark(); const p = e.features[0].properties; new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<b>${esc(p.name)}</b><br><small>${esc(p.k)}${p.info ? " · " + esc(p.info) : ""}</small>`).addTo(map); });
-  ["clusters", "stacks", "spider-pts", "pts", "community", "waves", "ctx-pts"].forEach(l => { map.on("mouseenter", l, () => { if (!st.mode) map.getCanvas().style.cursor = "pointer"; }); map.on("mouseleave", l, () => { if (!st.mode) map.getCanvas().style.cursor = ""; }); });
+  ["clusters", "stacks", "spider-pts", "pts", "community", "waves", "ctx-pts", "atmos-x", "atmos-ground", "under-core", "under-halo"].forEach(l => { map.on("mouseenter", l, () => { if (!st.mode) map.getCanvas().style.cursor = "pointer"; }); map.on("mouseleave", l, () => { if (!st.mode) map.getCanvas().style.cursor = ""; }); });
   map.on("click", e => { setTimeout(() => { if (st.mode === "add" && !was()) openAddForm(e.lngLat); }, 0); });
   map.on("contextmenu", e => { if (!notEnabled()) openAddForm(e.lngLat); });
   let lp; map.on("touchstart", e => { if (!e.originalEvent.touches || e.originalEvent.touches.length !== 1) return; const ll = e.lngLat; lp = setTimeout(() => { if (notEnabled()) return toast("Community reports aren't enabled yet."); if (navigator.vibrate) navigator.vibrate(30); openAddForm(ll); }, 650); });
@@ -965,9 +1222,11 @@ async function boot() {
     await loadType("ufo"); await applyFilters();
     loadCities();
     window.Atlas.ready = true;
-    const m = location.hash.match(/#(?:event|e)=([^&]+)/);
+    const m = location.hash.match(/#(?:event|e)=([^&]+)/), mv = location.hash.match(/#view=(atmos|under|earth)/), mp = /^#parks\b/.test(location.hash);
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // base entry = bare globe, so Back from the deep-linked popup stays on the site
-    if (m) { const id = decodeURIComponent(m[1]); const [t] = splitId(id); if (TI[t] !== undefined) { await loadType(t); if (t === "mass") { st.enabled.add("mass"); await applyFilters(); } } selectEvent(id, { fly: true }); }
+    if (mv && !m) await setView(mv[1]);
+    if (m) { const id0 = decodeURIComponent(m[1]), id = (st.manifest.aliases || {})[id0] || id0; const [t] = splitId(id); if (TI[t] !== undefined) { await loadType(t); if (t === "mass") { st.enabled.add("mass"); await applyFilters(); } } selectEvent(id, { fly: true }); }
+    else if (mp) openParks();
     else if (!isPhone()) openSheet("filters");
     loadCommunity(); countVisit();
   } catch (e) { console.error(e); window.Atlas.errors.push(String(e)); $("#loading-text").textContent = "Couldn't load the atlas data. Please refresh."; }
@@ -975,5 +1234,8 @@ async function boot() {
 window.Atlas.selectEvent = (id, o) => selectEvent(id, o);
 window.Atlas.applyFilters = () => applyFilters();
 window.Atlas.openStack = id => openStack(id);
+window.Atlas.setView = (v, o) => setView(v, o);
+window.Atlas.openParks = o => openParks(o);
+window.Atlas.np = NPS;
 boot();
 })();
