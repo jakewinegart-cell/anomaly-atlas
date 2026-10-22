@@ -127,3 +127,12 @@ details.rumors summary::-webkit-details-marker{display:none}details.rumors summa
   .menu{right:8px;width:min(300px,calc(100vw - 16px))}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* atlas2: shape+colour markers, donut clusters */
+.types .dot{width:18px;height:18px;border:0;border-radius:0;box-shadow:none;display:inline-flex;align-items:center;justify-content:center;background:none!important}
+.types .dot svg{filter:drop-shadow(0 0 4px rgba(255,255,255,.18))}
+.shp{flex:none;display:inline-block;vertical-align:-2px}
+.badge .shp{margin-right:2px}.search-results .shp{margin-right:4px}
+.donut{pointer-events:none;filter:drop-shadow(0 1px 3px rgba(0,0,0,.55)) drop-shadow(0 0 6px rgba(0,0,0,.25));transition:opacity .2s}
+.donut svg{display:block}.donut text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;paint-order:stroke;stroke:rgba(0,0,0,.5);stroke-width:2px}
+.arc-legend i{background:linear-gradient(90deg,rgba(255,255,255,.35) 0 20%,rgba(255,255,255,.9));height:2px}
+.arc-legend i.thick{height:6px}

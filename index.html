@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#05060f">
 <title>Anomaly Atlas: a globe of unexplained events</title>
 <meta name="description" content="Explore UFO sightings, Project Blue Book cases, cryptids, strange sounds, phenomena and mysteries on a zoomable 3D globe, each with a transparent credibility score.">
-<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas1">
-<link rel="stylesheet" href="styles.css?v=atlas1">
+<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas2">
+<link rel="stylesheet" href="styles.css?v=atlas2">
 </head>
 <body>
 <div id="stars" aria-hidden="true"></div>
@@ -64,7 +64,8 @@
     <label class="chk"><input type="checkbox" id="chk-autoconnect" checked> Draw arcs to correlated events on select</label>
     <div class="slider-row"><label for="conn-days">Within</label><input id="conn-days" type="range" min="0" max="365" value="7"><output id="conn-days-out">7 days</output></div>
     <div class="slider-row"><label for="conn-km">Within</label><input id="conn-km" type="range" min="10" max="1000" step="10" value="150"><output id="conn-km-out">150 km</output></div>
-    <div class="arc-legend"><span>weak</span><i></i><span>strong</span></div>
+    <div class="arc-legend"><span>weak</span><i></i><i class="thick"></i><span>strong</span></div>
+    <p class="hint">Arc width = link strength · arc colour = the linked event’s type.</p>
     <p class="hint">Arcs show up to 25 links ranked by time proximity, distance, shared type/keywords and report waves. Correlation isn't causation.</p>
     <button class="btn ghost wide" id="btn-reset">Reset filters</button>
   </div>
@@ -91,9 +92,9 @@
   <span>Anomaly Atlas · <a href="#" id="foot-about">Sources &amp; scoring</a> · Privacy: we count visits by approximate city only; no IPs or personal data are stored.</span>
 </footer>
 
-<script src="config.js?v=atlas1"></script>
-<script src="vendor/maplibre-gl.js?v=atlas1"></script>
-<script src="store.js?v=atlas1"></script>
-<script src="app.js?v=atlas1"></script>
+<script src="config.js?v=atlas2"></script>
+<script src="vendor/maplibre-gl.js?v=atlas2"></script>
+<script src="store.js?v=atlas2"></script>
+<script src="app.js?v=atlas2"></script>
 </body>
 </html>

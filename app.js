@@ -3,14 +3,46 @@
 "use strict";
 const C = window.ATLAS_CONFIG, S = window.AtlasStore, V = "?v=" + C.VERSION;
 const TYPES = [
-  { id: "ufo", label: "UFO / UAP sighting", color: "#38d6ff" },
-  { id: "bluebook", label: "Project Blue Book case", color: "#5b7cff" },
-  { id: "cryptid", label: "Cryptid / Bigfoot sighting", color: "#43e08a" },
-  { id: "sound", label: "Unexplained sound", color: "#ffb02e" },
-  { id: "phenomenon", label: "Strange phenomenon", color: "#c77dff" },
-  { id: "disappearance", label: "Disappearance (unexplained)", color: "#ff5c8a" },
-  { id: "mass", label: "Mass event: motive unexplained", color: "#b8c0cc", sub: "Documented tragedies · off by default" },
-  { id: "other", label: "High strangeness / other", color: "#f4e66b" }];
+  { id: "ufo", label: "UFO / UAP sighting", color: "#00e5ff", shape: "circle" },
+  { id: "bluebook", label: "Project Blue Book case", color: "#5468ff", shape: "square" },
+  { id: "cryptid", label: "Cryptid / Bigfoot sighting", color: "#2bff6b", shape: "triangle" },
+  { id: "sound", label: "Unexplained sound", color: "#ff8c00", shape: "diamond" },
+  { id: "phenomenon", label: "Strange phenomenon", color: "#ff2bd6", shape: "star" },
+  { id: "disappearance", label: "Disappearance (unexplained)", color: "#ff1f3d", shape: "hexagon" },
+  { id: "mass", label: "Mass event: motive unexplained", color: "#f2f2f2", shape: "target", sub: "Documented tragedies · off by default" },
+  { id: "other", label: "High strangeness / other", color: "#ffe500", shape: "cross" }];
+const COMMUNITY_COLOR = "#ffffff";
+/* ---- marker shapes: one geometry used by both the map icons (canvas) and the UI chips (SVG) ---- */
+function shapePts(shape) {   // polygon vertices in a unit box centred on 0,0 (radius ~1)
+  const poly = (n, rot, r = 1) => Array.from({ length: n }, (_, i) => { const a = rot + i * 2 * Math.PI / n; return [r * Math.cos(a), r * Math.sin(a)]; });
+  switch (shape) {
+    case "square": return [[-0.8, -0.8], [0.8, -0.8], [0.8, 0.8], [-0.8, 0.8]];
+    case "triangle": return [[0, -1.05], [0.98, 0.72], [-0.98, 0.72]];
+    case "diamond": return [[0, -1.08], [0.85, 0], [0, 1.08], [-0.85, 0]];
+    case "star": return Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.48 : 1.1; return [r * Math.cos(a), r * Math.sin(a)]; });
+    case "hexagon": return poly(6, Math.PI / 6, 0.98);
+    case "cross": { const a = 0.36, b = 1.0; return [[-a, -b], [a, -b], [a, -a], [b, -a], [b, a], [a, a], [a, b], [-a, b], [-a, a], [-b, a], [-b, -a], [-a, -a]]; }
+    default: return null;   // circle / target
+  }
+}
+function shapeSVG(t, size = 14, dashed = false) {
+  const pts = t && shapePts(t.shape), col = t ? t.color : COMMUNITY_COLOR, sw = 0.22;
+  const style = `fill="${dashed ? "none" : col}" stroke="${dashed ? "#fff" : "#0a0c18"}" stroke-width="${dashed ? 0.3 : sw}"${dashed ? ' stroke-dasharray="0.5 0.35"' : ""}`;
+  const body = pts ? `<polygon points="${pts.map(p => p.map(v => v.toFixed(2)).join(",")).join(" ")}" ${style}/>`
+    : `<circle r="${dashed ? 0.85 : 0.95}" ${style}/>` + (t && t.shape === "target" ? `<circle r="0.32" fill="#0a0c18"/>` : "");
+  return `<svg class="shp" width="${size}" height="${size}" viewBox="-1.25 -1.25 2.5 2.5" aria-hidden="true">${body}</svg>`;
+}
+function shapeIcon(t, curated) {   // canvas icon at 2x: soft glow, thin dark outline, white halo ring for curated cases
+  const S2 = curated ? 60 : 44, R = curated ? 15 : 12, c = document.createElement("canvas"); c.width = c.height = S2;
+  const g = c.getContext("2d"); g.translate(S2 / 2, S2 / 2);
+  const path = () => { g.beginPath(); const pts = shapePts(t.shape); if (!pts) g.arc(0, 0, R * 0.95, 0, 7); else { pts.forEach(([x, y], i) => i ? g.lineTo(x * R, y * R) : g.moveTo(x * R, y * R)); g.closePath(); } };
+  g.shadowColor = t.color; g.shadowBlur = 9; path(); g.fillStyle = t.color; g.fill();   // glow
+  g.shadowColor = "rgba(0,0,0,0.55)"; g.shadowBlur = 3; path(); g.fill(); g.shadowBlur = 0;
+  g.lineJoin = "round"; g.lineWidth = 2.6; g.strokeStyle = "#0a0c18"; path(); g.stroke();
+  if (t.shape === "target") { g.fillStyle = "#0a0c18"; g.beginPath(); g.arc(0, 0, R * 0.34, 0, 7); g.fill(); }
+  if (curated) { g.lineWidth = 2.4; g.strokeStyle = "#ffffff"; g.beginPath(); g.arc(0, 0, R + 7, 0, 7); g.stroke(); g.lineWidth = 1.2; g.strokeStyle = "#0a0c18"; g.beginPath(); g.arc(0, 0, R + 8.8, 0, 7); g.stroke(); }
+  return { width: S2, height: S2, data: g.getImageData(0, 0, S2, S2).data };
+}
 const TI = Object.fromEntries(TYPES.map((t, i) => [t.id, i]));
 const SPEC_OK = new Set(["ufo", "bluebook", "cryptid", "sound", "phenomenon"]);
 const NO_SPEC = new Set(["mass", "disappearance"]);
@@ -23,7 +55,7 @@ const st = {
   manifest: null, pts: {}, loading: {}, grid: new Map(), community: [], communityFiltered: [], theories: [], waves: [], links: [], ctx: null,
   enabled: new Set(TYPES.filter(t => t.id !== "mass").map(t => t.id)), community_on: true,
   cred: [0, 100], uq: [0, 100], years: [1000, 2026], undated: true, q: "",
-  connections: false, autoconnect: true, days: 7, km: 150, style: "dark", ctxOn: new Set(), visitorsOn: false,
+  connections: false, autoconnect: true, days: 7, km: 150, style: "realistic", ctxOn: new Set(), visitorsOn: false,
   selected: null, arcs: [], detailCache: {}, mode: null, linkA: null, visitors: null, admin: null, filtered: []
 };
 window.Atlas = { st, ready: false, errors: [] };
@@ -43,25 +75,120 @@ function closeSheet(id) { $("#" + id).dataset.state = "closed"; if (id === "filt
 
 /* ------------------------------------------------------------ map */
 let map;
-function styleFor(key) {
-  const s = C.STYLES[key];
-  if (s.url) return s.url;
+function baseURL() { return location.origin + location.pathname.replace(/[^/]*$/, ""); }
+function bmSource() {
+  return { type: "raster", tiles: [baseURL() + C.BLUE_MARBLE.tiles + V], tileSize: 256, minzoom: 0, maxzoom: C.BLUE_MARBLE.maxzoom, attribution: C.BLUE_MARBLE.attribution };
+}
+const lowZoom = (lo, hi, z = 7) => ["step", ["zoom"], lo, z, hi];
+async function realisticStyle(s) {
+  let vs = null;
+  try { const r = await fetch(s.vector); if (r.ok) vs = await r.json(); } catch (e) {}
+  const bm = { id: "bluemarble", type: "raster", source: "bm", paint: { "raster-opacity": ["interpolate", ["linear"], ["zoom"], 5.5, 1, 8, 0], "raster-fade-duration": 200, "raster-saturation": 0.05 } };
+  if (!vs) return { version: 8, glyphs: C.GLYPHS, sources: { bm: bmSource() }, layers: [{ id: "bg", type: "background", paint: { "background-color": "#0b2a4a" } }, Object.assign(bm, { paint: {} })] };
+  // drop the hosted shaded-relief raster: imagery comes only from our local tiles
+  for (const [k, src] of Object.entries(vs.sources)) if (src.type === "raster") { delete vs.sources[k]; vs.layers = vs.layers.filter(l => l.source !== k); }
+  vs.sources.bm = bmSource();
+  let at = vs.layers.findIndex(l => l.id === "aeroway_fill"); if (at < 0) at = vs.layers.findIndex(l => l.type === "line" && /road|tunnel|bridge/.test(l.id));
+  vs.layers.splice(at < 0 ? 1 : at, 0, bm);   // above land/water fills, below roads, borders and labels
+  for (const l of vs.layers) {
+    l.paint = l.paint || {};
+    if (/^boundary/.test(l.id) && typeof l.paint["line-color"] !== "object") {
+      l.paint["line-color"] = lowZoom("rgba(255,255,255,0.62)", l.paint["line-color"] || "#9e9cab");
+      l.minzoom = Math.min(l.minzoom || 0, l.id === "boundary_2" ? 0 : 3);
+    }
+    if (l.type === "symbol" && /^label_(country|state|city|town)|^water_name/.test(l.id)) {
+      const water = /^water/.test(l.id);
+      l.paint["text-color"] = lowZoom(water ? "#bfe3ff" : "#ffffff", typeof l.paint["text-color"] === "string" ? l.paint["text-color"] : "#333");
+      l.paint["text-halo-color"] = lowZoom("rgba(5,10,25,0.85)", "rgba(255,255,255,0.9)");
+      l.paint["text-halo-width"] = 1.4;
+    }
+  }
+  return vs;
+}
+const DUP_PLACE = /^(label|place)_(city|city_capital|city_large|town|village)$/;
+function stripPlaceLabels(vs) { vs.layers = vs.layers.filter(l => !(l.type === "symbol" && DUP_PLACE.test(l.id))); return vs; }
+async function styleFor(key) {
+  const s = C.STYLES[key] || C.STYLES.realistic;
+  if (s.vector) return stripPlaceLabels(await realisticStyle(s));
+  if (s.url) { try { const r = await fetch(s.url); if (r.ok) return stripPlaceLabels(await r.json()); } catch (e) {} return s.url; }
   return { version: 8, glyphs: C.GLYPHS, sources: { sat: { type: "raster", tiles: [s.raster], tileSize: 256, maxzoom: s.maxzoom, attribution: s.attribution } },
     layers: [{ id: "bg", type: "background", paint: { "background-color": "#05060f" } }, { id: "sat", type: "raster", source: "sat" }] };
 }
-function initMap() {
-  map = new maplibregl.Map({ container: "map", style: styleFor(st.style), center: [-98, 34], zoom: isPhone() ? 1.15 : 1.8, minZoom: 0.6, maxZoom: 19,
+async function initMap(stylePromise) {
+  map = new maplibregl.Map({ container: "map", style: await (stylePromise || styleFor(st.style)), center: [-98, 34], zoom: isPhone() ? 1.25 : 1.8, minZoom: 0.6, maxZoom: 19,
     attributionControl: { compact: true }, renderWorldCopies: false, maxPitch: 70 });
   window.Atlas.map = map;
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
   map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: false }, trackUserLocation: false }), "bottom-right");
   map.on("style.load", () => { try { map.setProjection({ type: "globe" }); } catch (e) {} setupSky(); addLayers(); refreshAll(); });
   map.on("error", e => { const m = (e && e.error && e.error.message) || ""; if (!/Failed to fetch|NetworkError|AbortError/i.test(m)) console.warn("map error", m); });
+  map.on("render", updateDonuts);
+  map.on("moveend", loadCityCells);
   wireMapEvents();
 }
 function setupSky() {
-  try { map.setSky({ "sky-color": "#0b0f2e", "horizon-color": "#2a2470", "fog-color": "#0b0f2e", "sky-horizon-blend": 0.6, "horizon-fog-blend": 0.6, "fog-ground-blend": 0.9,
+  const real = st.style !== "dark";
+  try { map.setSky({ "sky-color": "#0b0f2e", "horizon-color": real ? "#4f9dff" : "#2a2470", "fog-color": "#0b0f2e", "sky-horizon-blend": 0.6, "horizon-fog-blend": 0.6, "fog-ground-blend": 0.9,
     "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0] }); } catch (e) {}
+}
+/* ---- city labels: GeoNames cities500 (CC BY 4.0), tiered by population so smaller places need a closer zoom ---- */
+const CITY_TIERS = [[5e6, 1e12, 1, 13.5, true], [1e6, 5e6, 3, 12.5, true], [2.5e5, 1e6, 5, 12, false], [5e4, 2.5e5, 7, 11.5, false], [1e4, 5e4, 9, 11.5, false], [0, 1e4, 10.5, 11, false]];
+const CITY_CELL_ZOOM = 8.5;
+function addCities(c) {
+  const out = st.cityFeats || (st.cityFeats = []);
+  for (let i = 0; i < c.n.length; i++) out.push({ type: "Feature", geometry: { type: "Point", coordinates: [c.x[i], c.y[i]] }, properties: { n: c.n[i], p: c.p[i] } });
+  if (map && map.getSource("cities")) map.getSource("cities").setData({ type: "FeatureCollection", features: out });
+}
+async function loadCities() {
+  try {
+    const [idx, base] = await Promise.all([getJSON(`data/cities/index.json${V}`), getJSON(`data/cities/base.json${V}`)]);
+    st.cityIdx = idx; st.cityCells = new Set(idx.cells); st.cityLoaded = new Set(); addCities(base); loadCityCells();
+  } catch (e) { console.warn("city labels unavailable", e); }
+}
+async function loadCityCells() {
+  if (!st.cityIdx || !map || map.getZoom() < CITY_CELL_ZOOM) return;
+  const b = map.getBounds(), cs = st.cityIdx.cell, want = [];
+  const x0 = Math.floor((Math.max(-180, b.getWest()) + 180) / cs), x1 = Math.floor((Math.min(179.999, b.getEast()) + 180) / cs);
+  const y0 = Math.floor((Math.max(-90, b.getSouth()) + 90) / cs), y1 = Math.floor((Math.min(89.999, b.getNorth()) + 90) / cs);
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "_" + y; if (st.cityCells.has(k) && !st.cityLoaded.has(k)) want.push(k); }
+  if (want.length > 9) return;   // safety: never pull a whole continent at once
+  want.forEach(k => st.cityLoaded.add(k));
+  const got = await Promise.all(want.map(k => getJSON(`data/cities/c/${k}.json${V}`).catch(() => null)));
+  for (const c of got) if (c) addCities(c);
+}
+/* ---- cluster donuts: proportional ring of type colours around the count (HTML markers, pointer-events off) ---- */
+const DONUT_R = (matchMedia("(max-width: 820px)").matches ? [12, 14, 17, 21, 25] : [15, 18, 22, 27, 33]);
+let donutCache = {}, donutsOn = {};
+function clearDonuts() { for (const m of Object.values(donutsOn)) m.remove(); donutCache = {}; donutsOn = {}; }
+function donutEl(p) {
+  const n = p.point_count, r = n < 10 ? DONUT_R[0] : n < 100 ? DONUT_R[1] : n < 1000 ? DONUT_R[2] : n < 10000 ? DONUT_R[3] : DONUT_R[4];
+  const w = Math.max(5, Math.round(r * 0.36)), r0 = r - w, sz = r * 2 + 8, cx = sz / 2;
+  const counts = TYPES.map((t, i) => p["c" + i] || 0), tot = counts.reduce((a, b) => a + b, 0) || 1;
+  let segs = "", acc = 0;
+  const pt = (rad, f) => [cx + rad * Math.sin(2 * Math.PI * f), cx - rad * Math.cos(2 * Math.PI * f)];
+  counts.forEach((c, i) => {
+    if (!c) return; const f0 = acc / tot, f1 = (acc += c) / tot;
+    if (c === tot) { segs += `<circle cx="${cx}" cy="${cx}" r="${r - w / 2}" fill="none" stroke="${TYPES[i].color}" stroke-width="${w}"/>`; return; }
+    const lg = f1 - f0 > 0.5 ? 1 : 0, [x0, y0] = pt(r, f0), [x1, y1] = pt(r, f1), [x2, y2] = pt(r0, f1), [x3, y3] = pt(r0, f0);
+    segs += `<path d="M${x0} ${y0}A${r} ${r} 0 ${lg} 1 ${x1} ${y1}L${x2} ${y2}A${r0} ${r0} 0 ${lg} 0 ${x3} ${y3}Z" fill="${TYPES[i].color}"/>`;
+  });
+  const el = document.createElement("div"); el.className = "donut";
+  el.title = TYPES.map((t, i) => counts[i] ? `${t.label}: ${counts[i]}` : "").filter(Boolean).join("\n");
+  el.innerHTML = `<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}"><circle cx="${cx}" cy="${cx}" r="${r + 1.5}" fill="#0a0c18" opacity="0.85"/>${segs}<circle cx="${cx}" cy="${cx}" r="${r0 - 0.5}" fill="rgba(10,12,28,0.9)"/><text x="${cx}" y="${cx}" dy="0.36em" text-anchor="middle" font-size="${r < 20 ? 11 : 12.5}" font-weight="700" fill="#fff">${p.point_count_abbreviated}</text></svg>`;
+  return el;
+}
+function updateDonuts() {
+  if (!map || !map.getSource("events") || !map.isSourceLoaded("events")) return;
+  const next = {};
+  for (const f of map.querySourceFeatures("events")) {
+    const p = f.properties; if (!p.cluster) continue;
+    const id = p.cluster_id; if (next[id]) continue;
+    let m = donutCache[id];
+    if (!m) m = donutCache[id] = new maplibregl.Marker({ element: donutEl(p), opacityWhenCovered: "0" }).setLngLat(f.geometry.coordinates);
+    next[id] = m; if (!donutsOn[id]) m.addTo(map);
+  }
+  for (const id in donutsOn) if (!next[id]) donutsOn[id].remove();
+  donutsOn = next;
 }
 function domColorExpr() {
   const cases = ["case"];
@@ -74,6 +201,7 @@ function domColorExpr() {
 function dashedRing(color, size = 44) {
   const c = document.createElement("canvas"); c.width = c.height = size; const g = c.getContext("2d");
   g.fillStyle = color + "55"; g.beginPath(); g.arc(size / 2, size / 2, size / 2 - 6, 0, 7); g.fill();
+  g.lineWidth = 5.5; g.strokeStyle = "rgba(10,12,24,0.8)"; g.beginPath(); g.arc(size / 2, size / 2, size / 2 - 4, 0, 7); g.stroke();
   g.setLineDash([5, 4]); g.lineWidth = 3.5; g.strokeStyle = "#fff"; g.beginPath(); g.arc(size / 2, size / 2, size / 2 - 4, 0, 7); g.stroke();
   g.setLineDash([]); g.fillStyle = color; g.beginPath(); g.arc(size / 2, size / 2, size / 5, 0, 7); g.fill();
   return { width: size, height: size, data: g.getImageData(0, 0, size, size).data };
@@ -83,23 +211,40 @@ function addLayers() {
   const clusterProps = {}; TYPES.forEach((t, i) => clusterProps["c" + i] = ["+", ["case", ["==", ["get", "t"], i], 1, 0]]);
   map.addSource("events", { type: "geojson", data: { type: "FeatureCollection", features: st.filtered }, cluster: true, clusterMaxZoom: 13, clusterRadius: 48, clusterProperties: clusterProps, buffer: 64, tolerance: 0.5 });
   ["community", "arcs", "theories", "waves", "sel", "ctx", "visitors"].forEach(id => map.addSource(id, { type: "geojson", data: empty }));
-  TYPES.forEach(t => { if (!map.hasImage("ring-" + t.id)) map.addImage("ring-" + t.id, dashedRing(t.color), { pixelRatio: 2 }); });
+  TYPES.forEach(t => { if (!map.hasImage("ring-" + t.id)) map.addImage("ring-" + t.id, dashedRing(t.color), { pixelRatio: 2 });
+    if (!map.hasImage("sh-" + t.id)) map.addImage("sh-" + t.id, shapeIcon(t, false), { pixelRatio: 2 });
+    if (!map.hasImage("sh-" + t.id + "-c")) map.addImage("sh-" + t.id + "-c", shapeIcon(t, true), { pixelRatio: 2 }); });
   const font = C.FONT;
-  map.addLayer({ id: "ctx-pts", type: "circle", source: "ctx", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 2.5, 8, 6], "circle-color": ["match", ["get", "k"], "military", "#ff4d4d", "launch", "#ff9f1a", "airport", "#9aa7ff", "#ccc"], "circle-stroke-width": 1, "circle-stroke-color": "#000", "circle-opacity": 0.85 } });
+  map.addSource("cities", { type: "geojson", data: { type: "FeatureCollection", features: st.cityFeats || [] }, buffer: 32,
+    attribution: 'City names: <a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a> (CC BY 4.0)' });
+  // tiers: [min population, max population, minzoom, text size, font]; added smallest-first so major cities win collisions
+  [...CITY_TIERS].reverse().forEach(([lo, hi, mz, size, bold], k) => map.addLayer({ id: "city-" + (CITY_TIERS.length - 1 - k), type: "symbol", source: "cities", minzoom: mz,
+    filter: ["all", [">=", ["get", "p"], lo], ["<", ["get", "p"], hi]],
+    layout: { "text-field": ["get", "n"], "text-font": bold ? ["Noto Sans Bold"] : font, "text-size": ["interpolate", ["linear"], ["zoom"], mz, size, mz + 6, size + 2],
+      "symbol-sort-key": ["-", 0, ["get", "p"]], "text-padding": 4,
+      // offset from the exact city point, where clusters/pins usually sit, so names stay readable beside them
+      "text-variable-anchor": ["top", "bottom", "left", "right"], "text-radial-offset": mz >= 9 ? 0.9 : 1.5, "text-justify": "auto", "text-max-width": 8, "text-allow-overlap": false, "text-optional": false,
+      "text-letter-spacing": bold ? 0.02 : 0 },
+    paint: { "text-color": "#ffffff", "text-halo-color": "rgba(6,10,24,0.88)", "text-halo-width": 1.6, "text-halo-blur": 0.4,
+      "text-opacity": ["interpolate", ["linear"], ["zoom"], mz, 0.75, mz + 0.6, 1] } }));
+  map.addLayer({ id: "ctx-pts", type: "circle", source: "ctx", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 2.5, 8, 6], "circle-color": "rgba(10,12,24,0.55)", "circle-stroke-width": 2, "circle-stroke-color": ["match", ["get", "k"], "military", "#ff7b7b", "launch", "#ffc46b", "airport", "#d6dcff", "#ccc"] } });
   map.addLayer({ id: "ctx-lbl", type: "symbol", source: "ctx", minzoom: 5, layout: { "text-field": ["get", "name"], "text-font": font, "text-size": 11, "text-offset": [0, 1.1], "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#ffd0c4", "text-halo-color": "#000", "text-halo-width": 1.2 } });
   map.addLayer({ id: "visitors", type: "circle", source: "visitors", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "visits"], 1, 4, 100, 14, 10000, 30], "circle-color": "#ffffff", "circle-opacity": 0.18, "circle-stroke-color": "#fff", "circle-stroke-width": 1.2 } });
   map.addLayer({ id: "waves", type: "circle", source: "waves", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "count"], 12, 18, 200, 46], "circle-color": "rgba(255,240,140,0.06)", "circle-stroke-color": "#fff08c", "circle-stroke-width": 1.5, "circle-stroke-opacity": 0.7 } });
+  // clusters: an (almost) invisible hit circle for taps; the visible donut (type mix + count) is an HTML marker, see updateDonuts()
   map.addLayer({ id: "clusters", type: "circle", source: "events", filter: ["has", "point_count"], paint: {
-    "circle-color": domColorExpr(), "circle-opacity": 0.82, "circle-stroke-color": "rgba(255,255,255,0.75)", "circle-stroke-width": 1.5,
-    "circle-radius": ["step", ["get", "point_count"], 14, 10, 17, 100, 21, 1000, 26, 10000, 32] } });
-  map.addLayer({ id: "cluster-count", type: "symbol", source: "events", filter: ["has", "point_count"], layout: { "text-field": ["get", "point_count_abbreviated"], "text-font": font, "text-size": 12, "text-allow-overlap": true }, paint: { "text-color": "#05060f" } });
-  map.addLayer({ id: "pts", type: "circle", source: "events", filter: ["!", ["has", "point_count"]], paint: {
-    "circle-color": ["match", ["get", "t"], ...TYPES.flatMap((t, i) => [i, t.color]), "#999"],
-    "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, ["case", ["==", ["get", "c"], 1], 6, 4], 12, ["case", ["==", ["get", "c"], 1], 10, 7]],
-    "circle-stroke-color": ["case", ["==", ["get", "c"], 1], "#ffffff", "rgba(0,0,0,0.6)"], "circle-stroke-width": ["case", ["==", ["get", "c"], 1], 2, 1] } });
+    "circle-color": domColorExpr(), "circle-opacity": 0.004, "circle-stroke-width": 0,
+    "circle-radius": ["step", ["get", "point_count"], DONUT_R[0], 10, DONUT_R[1], 100, DONUT_R[2], 1000, DONUT_R[3], 10000, DONUT_R[4]] } });
+  map.addLayer({ id: "pts", type: "symbol", source: "events", filter: ["!", ["has", "point_count"]], layout: {
+    "icon-image": ["concat", "sh-", ["match", ["get", "t"], ...TYPES.flatMap((t, i) => [i, t.id]), "other"], ["case", ["==", ["get", "c"], 1], "-c", ""]],
+    "icon-size": ["interpolate", ["linear"], ["zoom"], 2, 0.72, 8, 0.95, 14, 1.15], "icon-allow-overlap": true, "icon-ignore-placement": true,
+    "symbol-sort-key": ["get", "c"] } });
   map.addLayer({ id: "community", type: "symbol", source: "community", layout: { "icon-image": ["concat", "ring-", ["get", "type"]], "icon-size": ["interpolate", ["linear"], ["zoom"], 2, 0.8, 12, 1.2], "icon-allow-overlap": true } });
+  map.addLayer({ id: "arcs-case", type: "line", source: "arcs", layout: { "line-cap": "round", "line-join": "round" }, paint: {
+    "line-color": "#060814", "line-width": ["interpolate", ["linear"], ["get", "s"], 0, 3, 1, 8], "line-opacity": 0.5, "line-blur": 1 } });
   map.addLayer({ id: "arcs", type: "line", source: "arcs", layout: { "line-cap": "round", "line-join": "round" }, paint: {
-    "line-color": ["interpolate", ["linear"], ["get", "s"], 0, "#5b6bd6", 0.5, "#38d6ff", 1, "#fff3a6"], "line-width": ["interpolate", ["linear"], ["get", "s"], 0, 1, 1, 5], "line-opacity": 0.85 } });
+    "line-color": ["coalesce", ["get", "col"], "#ffffff"], "line-width": ["interpolate", ["linear"], ["get", "s"], 0, 1, 1, 5],
+    "line-opacity": ["interpolate", ["linear"], ["get", "s"], 0, 0.55, 1, 0.95] } });
   map.addLayer({ id: "arcs-hit", type: "line", source: "arcs", paint: { "line-color": "#000", "line-opacity": 0.01, "line-width": 16 } });
   map.addLayer({ id: "theories", type: "line", source: "theories", layout: { "line-cap": "round" }, paint: { "line-color": "#ff7ad9", "line-width": 2.5, "line-dasharray": [2, 2], "line-opacity": 0.9 } });
   map.addLayer({ id: "theories-hit", type: "line", source: "theories", paint: { "line-color": "#000", "line-opacity": 0.01, "line-width": 16 } });
@@ -108,7 +253,7 @@ function addLayers() {
 }
 function refreshAll() {
   if (!map.getSource("events")) return;
-  map.getSource("events").setData({ type: "FeatureCollection", features: st.filtered });
+  clearDonuts(); map.getSource("events").setData({ type: "FeatureCollection", features: st.filtered });
   renderCommunity(); renderArcs(); renderTheories(); renderWaves(); renderCtx(); renderVisitors(); renderSel();
 }
 
@@ -175,11 +320,11 @@ async function applyFilters() {
   $("#total-shown").textContent = fmtN(shown); $("#total-all").textContent = fmtN(all);
   $("#count-badge").textContent = shown >= 1000 ? (shown / 1000).toFixed(shown >= 1e4 ? 0 : 1) + "k" : shown;
   renderTypeList();
-  if (map && map.getSource("events")) { map.getSource("events").setData({ type: "FeatureCollection", features: out }); renderCommunity(); }
+  if (map && map.getSource("events")) { clearDonuts(); map.getSource("events").setData({ type: "FeatureCollection", features: out }); renderCommunity(); }
 }
 function renderTypeList() {
-  const rows = TYPES.map(t => `<li><button data-type="${t.id}" aria-pressed="${st.enabled.has(t.id)}"><span class="dot" style="background:${t.color};border-color:${t.color};color:${t.color}"></span><span class="tl">${esc(t.label)}${t.sub ? `<span class="sub">${t.sub}</span>` : ""}</span><span class="tc">${st.counts ? fmtN(st.counts[t.id]) : "…"}</span></button></li>`);
-  rows.push(`<li><button data-type="community" aria-pressed="${st.community_on}"><span class="dot dashed" style="border-color:#fff;color:#fff"></span><span class="tl">Community reports<span class="sub">${S.available === false || !S.enabled ? "Not enabled yet" : "Unreviewed, user-submitted"}</span></span><span class="tc">${fmtN(st.communityCount || 0)}</span></button></li>`);
+  const rows = TYPES.map(t => `<li><button data-type="${t.id}" aria-pressed="${st.enabled.has(t.id)}"><span class="dot">${shapeSVG(t, 16)}</span><span class="tl">${esc(t.label)}${t.sub ? `<span class="sub">${t.sub}</span>` : ""}</span><span class="tc">${st.counts ? fmtN(st.counts[t.id]) : "…"}</span></button></li>`);
+  rows.push(`<li><button data-type="community" aria-pressed="${st.community_on}"><span class="dot">${shapeSVG(null, 16, true)}</span><span class="tl">Community reports<span class="sub">${S.available === false || !S.enabled ? "Not enabled yet" : "Unreviewed, user-submitted"}</span></span><span class="tc">${fmtN(st.communityCount || 0)}</span></button></li>`);
   $("#type-list").innerHTML = rows.join("");
   $("#uq-wrap").hidden = !st.enabled.has("mass");
 }
@@ -228,7 +373,7 @@ function rumorsHTML(r) {
 }
 function renderDetail(r) {
   const t = TYPES[TI[r.type]] || TYPES[7];
-  $("#detail-kicker").innerHTML = `<span class="badge"><span class="dot" style="background:${t.color}"></span>${esc(t.label)}</span>` + (r.community ? `<span class="badge unrev">Unreviewed community report</span>` : r.src === "curated" ? `<span class="badge cur">Curated case</span>` : "");
+  $("#detail-kicker").innerHTML = `<span class="badge" style="border:1px solid ${t.color}66">${shapeSVG(t, 13)}${esc(t.label)}</span>` + (r.community ? `<span class="badge unrev">Unreviewed community report</span>` : r.src === "curated" ? `<span class="badge cur">Curated case</span>` : "");
   const imgs = (r.images || []).map(im => `<figure class="img-fig"><img loading="lazy" src="${esc(im.src)}${V}" alt="${esc(r.title)}"><figcaption>${esc(im.credit)} · ${esc(im.license)} · <a href="${esc(im.page)}" target="_blank" rel="noopener">Wikimedia Commons</a></figcaption></figure>`).join("");
   const ex = (r.excerpts || []).map(e => `<blockquote>“${esc(e.text)}”<cite>— ${esc(e.by)}</cite></blockquote>`).join("");
   const srcs = (r.sources || []).slice(), gen = st.manifest.sources[r.src];
@@ -304,10 +449,10 @@ function arcLine(a, b, bulge = 0.18) {
 }
 function renderArcs() {
   if (!map || !map.getSource("arcs")) return;
-  const feats = (st.arcs || []).map(a => ({ type: "Feature", geometry: { type: "LineString", coordinates: arcLine(a.from, a.to) }, properties: { s: a.s, why: a.why.join(" · "), n: a.f.properties.n } }));
+  const feats = (st.arcs || []).map(a => ({ type: "Feature", geometry: { type: "LineString", coordinates: arcLine(a.from, a.to) }, properties: { s: a.s, why: a.why.join(" · "), n: a.f.properties.n, col: (TYPES[a.f.properties.t] || {}).color } }));
   if (st.connections && !st.selected) for (const l of st.links) {
     const fa = ptById(l.a), fb = ptById(l.b); if (!fa || !fb) continue;
-    feats.push({ type: "Feature", geometry: { type: "LineString", coordinates: arcLine(fa.geometry.coordinates, fb.geometry.coordinates) }, properties: { s: l.s, why: l.why.join(" · "), n: fa.properties.n + " ↔ " + fb.properties.n } });
+    feats.push({ type: "Feature", geometry: { type: "LineString", coordinates: arcLine(fa.geometry.coordinates, fb.geometry.coordinates) }, properties: { s: l.s, why: l.why.join(" · "), n: fa.properties.n + " ↔ " + fb.properties.n, col: (TYPES[fb.properties.t] || {}).color } });
   }
   map.getSource("arcs").setData({ type: "FeatureCollection", features: feats });
 }
@@ -476,7 +621,7 @@ async function doSearch(q) {
   const ql = q.toLowerCase(), hits = [];
   for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr) continue; for (const f of arr) if (f.properties.c && f.properties.n.toLowerCase().includes(ql)) hits.push(f); }
   for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr || hits.length >= 8) continue; for (const f of arr) { if (!f.properties.c && f.properties.n.toLowerCase().includes(ql)) { hits.push(f); if (hits.length >= 8) break; } } }
-  let html = hits.length ? `<div class="sr-h">Events</div>` + hits.slice(0, 8).map(f => `<button type="button" data-id="${esc(f.properties.i)}"><span style="color:${TYPES[f.properties.t].color}">●</span> ${esc(f.properties.n)}</button>`).join("") : "";
+  let html = hits.length ? `<div class="sr-h">Events</div>` + hits.slice(0, 8).map(f => `<button type="button" data-id="${esc(f.properties.i)}">${shapeSVG(TYPES[f.properties.t], 12)} ${esc(f.properties.n)}</button>`).join("") : "";
   html += `<div class="sr-h">Fly to a place</div><div id="sr-places"><button type="button" disabled>Searching places…</button></div>`;
   box.innerHTML = html; box.hidden = false;
   box.querySelectorAll("button[data-id]").forEach(b => b.onclick = () => { box.hidden = true; selectEvent(b.dataset.id, { fly: true, zoom: 8 }); });
@@ -547,7 +692,7 @@ function openAbout() {
    <h3>Credibility score (0–100)</h3><p class="hint">Innocent until proven guilty: every event starts at <b>60</b>. Evidence that it was false weighs heavily: hoax −50, disproven −45, identified/explained −35, probable conventional explanation −20, partly explained −12, disputed explanation −5. Boosts: multiple witnesses +8 (10+: +12, 100+: +15), official/military investigation +10, radar/instruments +10, physical evidence +8, photo/video +5, credible witness type (pilot, police, military, scientist) +8, recurring phenomenon +8, BFRO Class A +5. Penalties: BFRO Class C −10, very short/vague report −8, unreviewed single community submission −5.</p>
    <h3>Unanswered-questions score (mass events only)</h3><p class="hint">Scores the <b>why</b>, never whether it happened: motive undetermined +45, partly established +25, established +5; investigation closed without a motive +20, unsolved +25, open +15, closed with clear findings 0; +10 per documented open question from official or reputable sources (max +30). Rumors never change it.</p>
    <h3>Sources</h3>${Object.values(m.sources).map(s => `<div class="kv"><span><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}</a><br><small>${esc(s.license)}</small></span><b>${fmtN(Object.values(m.counts_by_source[s.id] || {}).reduce((a, b) => a + b, 0))}</b></div>`).join("")}
-   <p class="hint">Context layers: US DoD MIRTA sites via HIFLD Open (public domain), OurAirports (public domain), launch sites (Wikipedia), meteor showers (IMO calendar). Basemaps © OpenStreetMap contributors via OpenFreeMap; imagery: Sentinel-2 cloudless 2016 by EOX (CC BY 4.0). Place search: OSM Nominatim.</p>
+   <p class="hint">Context layers: US DoD MIRTA sites via HIFLD Open (public domain), OurAirports (public domain), launch sites (Wikipedia), meteor showers (IMO calendar). Basemaps © OpenStreetMap contributors via OpenFreeMap; Realistic Earth imagery: NASA Blue Marble Next Generation (NASA Earth Observatory, public domain), self-hosted; satellite imagery: Sentinel-2 cloudless 2016 by EOX (CC BY 4.0). City labels: GeoNames cities500 (CC BY 4.0). Place search: OSM Nominatim.</p>
    <p class="hint">Data built ${esc(m.built)} · ${esc(C.VERSION)}</p>`);
 }
 
@@ -583,7 +728,7 @@ function wireUI() {
   $("#btn-more").onclick = e => { e.stopPropagation(); $("#more-menu").hidden = !$("#more-menu").hidden; };
   document.addEventListener("click", e => { if (!e.target.closest("#more-menu") && !e.target.closest("#btn-more")) $("#more-menu").hidden = true; if (!e.target.closest("#search-form")) $("#search-results").hidden = true; });
   $("#style-seg").innerHTML = Object.entries(C.STYLES).map(([k, s]) => `<button type="button" data-style="${k}" class="${k === st.style ? "on" : ""}">${s.label}</button>`).join("");
-  $("#style-seg").onclick = e => { const b = e.target.closest("button[data-style]"); if (!b || b.dataset.style === st.style) return; st.style = b.dataset.style; $$("#style-seg button").forEach(x => x.classList.toggle("on", x === b)); map.setStyle(styleFor(st.style)); };
+  $("#style-seg").onclick = e => { const b = e.target.closest("button[data-style]"); if (!b || b.dataset.style === st.style) return; st.style = b.dataset.style; $$("#style-seg button").forEach(x => x.classList.toggle("on", x === b)); clearDonuts(); styleFor(st.style).then(sty => map.setStyle(sty)); };
   $$("[data-ctx]").forEach(c => c.onchange = () => { c.checked ? st.ctxOn.add(c.dataset.ctx) : st.ctxOn.delete(c.dataset.ctx); renderCtx(); });
   $("#chk-visitors").onchange = e => { st.visitorsOn = e.target.checked; renderVisitors(); };
   $("#btn-visitors").onclick = () => { $("#more-menu").hidden = true; openVisitors(); };
@@ -593,7 +738,7 @@ function wireUI() {
   document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#modal").hidden) closeModal(); else if (st.mode) setMode(null); else closeSheet("detail"); } });
   let sT; $("#search").oninput = e => { clearTimeout(sT); const v = e.target.value; sT = setTimeout(() => v.length >= 3 && doSearch(v), 900); };
   $("#search-form").onsubmit = e => { e.preventDefault(); clearTimeout(sT); doSearch($("#search").value); };
-  $("#legend-chip").innerHTML = TYPES.filter(t => t.id !== "mass").map(t => `<span><i style="background:${t.color}"></i>${esc(t.label.replace(" sighting", "").replace(" (unexplained)", ""))}</span>`).join("") + `<span><i style="border:1.5px dashed #fff"></i>Community</span>`;
+  $("#legend-chip").innerHTML = TYPES.filter(t => t.id !== "mass").map(t => `<span>${shapeSVG(t, 12)}${esc(t.label.replace(" sighting", "").replace(" (unexplained)", ""))}</span>`).join("") + `<span>${shapeSVG(null, 12, true)}Community</span>`;
   wireSheets();
 }
 function wireSheets() {   // drag handle for phone bottom sheets
@@ -638,15 +783,17 @@ async function boot() {
   window.addEventListener("error", e => window.Atlas.errors.push(String(e.message)));
   window.addEventListener("unhandledrejection", e => window.Atlas.errors.push("unhandled: " + String(e.reason && e.reason.message || e.reason)));
   try {
+    const stylePromise = styleFor(st.style);   // fetch the basemap style while data loads
     st.manifest = await getJSON(`data/manifest.json${V}`);
     wireUI(); renderTypeList();
     $("#loading-text").textContent = `Loading ${fmtN(st.manifest.total)} events…`;
     const [w, l] = await Promise.all([getJSON(`data/waves.json${V}`), getJSON(`data/links.json${V}`)]); st.waves = w; st.links = l;
     await Promise.all(["sound", "phenomenon", "disappearance", "other", "mass", "cryptid", "bluebook"].map(loadType)); await applyFilters();
-    initMap();
+    await initMap(stylePromise);
     await new Promise(r => map.loaded() ? r() : map.once("load", r));
     $("#loading").classList.add("done");
     await loadType("ufo"); await applyFilters();
+    loadCities();
     window.Atlas.ready = true;
     const m = location.hash.match(/#e=([^&]+)/);
     if (m) { const id = decodeURIComponent(m[1]); const [t] = splitId(id); if (TI[t] !== undefined) { await loadType(t); if (t === "mass") { st.enabled.add("mass"); await applyFilters(); } } selectEvent(id, { fly: true }); }
