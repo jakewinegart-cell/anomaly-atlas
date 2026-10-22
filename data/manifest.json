@@ -1,6 +1,6 @@
 {
  "name": "Anomaly Atlas",
- "built": "2026-10-22T02:16:40",
+ "built": "2026-10-22T03:18:03",
  "types": [
   "ufo",
   "bluebook",
@@ -49,9 +49,9 @@
   },
   "disappearance": {
    "points": "data/points/disappearance.json",
-   "bytes": 1705,
-   "count": 27,
-   "chunks": 1,
+   "bytes": 267482,
+   "count": 2646,
+   "chunks": 7,
    "chunk_size": 400
   },
   "mass": {
@@ -88,6 +88,9 @@
   },
   "nuforc": {
    "ufo": 87183
+  },
+  "np-missing": {
+   "disappearance": 2619
   }
  },
  "counts_by_type": {
@@ -96,11 +99,11 @@
   "cryptid": 4061,
   "sound": 16,
   "phenomenon": 20,
-  "disappearance": 27,
+  "disappearance": 2646,
   "mass": 8,
   "other": 14
  },
- "total": 101322,
+ "total": 103941,
  "sources": {
   "nuforc": {
    "id": "nuforc",
@@ -122,6 +125,12 @@
    "url": "https://github.com/timothyrenner/bfro_sightings_data",
    "data_url": "https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-09-13/bigfoot.csv",
    "license": "Scraper code MIT; report text \u00a9 BFRO (bfro.net). Short attributed excerpts + link to original report."
+  },
+  "np-missing": {
+   "id": "np-missing",
+   "name": "National Park Service missing-person records (compiled for Anomaly Atlas)",
+   "url": "https://www.nps.gov/orgs/1563/cold-cases.htm",
+   "license": "Summaries written for Anomaly Atlas from the linked sources. NPS records (FOIA 18-465, Morning Report, ISB cold cases) are US government works; Wikipedia-derived facts CC BY-SA 4.0; Charley Project / news text not copied. Each record links its own sources."
   },
   "curated": {
    "id": "curated",
@@ -157,5 +166,13 @@
   "airports": 5280,
   "launch": 27,
   "showers": 12
+ },
+ "np_missing": {
+  "merged_into_curated": [],
+  "fixes": {
+   "yellowstone_state_fixed": 100,
+   "foia_row_named": 1,
+   "missing_state_fixed": 1
+  }
  }
 }

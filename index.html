@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#05060f">
 <title>Anomaly Atlas: a globe of unexplained events</title>
 <meta name="description" content="Explore UFO sightings, Project Blue Book cases, cryptids, strange sounds, phenomena and mysteries on a zoomable 3D globe, each with a transparent credibility score.">
-<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas3">
-<link rel="stylesheet" href="styles.css?v=atlas3">
+<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas4">
+<link rel="stylesheet" href="styles.css?v=atlas4">
 </head>
 <body>
 <div id="stars" aria-hidden="true"></div>
@@ -54,7 +54,12 @@
     <div id="uq-wrap" hidden>
       <h3>Unanswered-questions score <output id="uq-out">0–100</output></h3>
       <div class="range2 uq" id="uq-range"><input type="range" min="0" max="100" value="0" aria-label="Minimum unanswered-questions score"><input type="range" min="0" max="100" value="100" aria-label="Maximum unanswered-questions score"></div>
-      <p class="hint">For mass-casualty events this scores the <em>why</em> (how unresolved the motive is), never whether it happened.</p>
+      <p class="hint">Mass events: scores the <em>why</em> (how unresolved the motive is). Missing persons: how unresolved the case is (found alive is low, never found is high). Never whether it happened.</p>
+    </div>
+    <div id="missing-wrap" hidden>
+      <h3>Missing persons: outcome</h3>
+      <div class="chips" id="outcome-chips"></div>
+      <label class="chk"><input type="checkbox" id="m411-toggle"> Missing 411 case only <small class="hint">(<span id="m411-count">0</span> tagged)</small></label>
     </div>
     <h3>Date range <output id="date-out"></output></h3>
     <div class="range2" id="date-range"><input type="range" min="1000" max="2026" value="1000" aria-label="From year"><input type="range" min="1000" max="2026" value="2026" aria-label="To year"></div>
@@ -92,9 +97,9 @@
   <span>Anomaly Atlas · <a href="#" id="foot-about">Sources &amp; scoring</a> · Privacy: we count visits by approximate city only; no IPs or personal data are stored.</span>
 </footer>
 
-<script src="config.js?v=atlas3"></script>
-<script src="vendor/maplibre-gl.js?v=atlas3"></script>
-<script src="store.js?v=atlas3"></script>
-<script src="app.js?v=atlas3"></script>
+<script src="config.js?v=atlas4"></script>
+<script src="vendor/maplibre-gl.js?v=atlas4"></script>
+<script src="store.js?v=atlas4"></script>
+<script src="app.js?v=atlas4"></script>
 </body>
 </html>

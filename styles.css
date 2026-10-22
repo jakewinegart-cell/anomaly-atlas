@@ -148,3 +148,20 @@ details.rumors summary::-webkit-details-marker{display:none}details.rumors summa
 .sl-p{font-size:12.5px;color:#c9cde6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .sl-s{flex:none;min-width:34px;text-align:center;font-weight:700;font-size:13px;padding:3px 6px;border-radius:8px;background:rgba(56,214,255,.14);color:#9ff0ff}
 .sl-s.uq{background:rgba(255,169,77,.16);color:#ffd2a1}
+/* atlas4: missing persons */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+.chip{border:1px solid var(--line);background:rgba(255,255,255,.05);border-radius:16px;padding:5px 10px;font-size:12.5px}
+.chip small{opacity:.7;margin-left:3px}.chip[aria-pressed=false]{opacity:.45;text-decoration:line-through}
+.chip.oc-a[aria-pressed=true]{border-color:#5ee6a8}.chip.oc-d[aria-pressed=true]{border-color:#b9c2d6}.chip.oc-n[aria-pressed=true]{border-color:#ff8a8a}.chip.oc-u[aria-pressed=true]{border-color:#ffd27a}
+.outcome{margin:2px 0 12px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.05);display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+.outcome .oc-l{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted)}.outcome b{font-size:18px}
+.outcome .oc-n{flex-basis:100%;font-size:12px;color:var(--muted)}
+.outcome.oc-a{border-color:rgba(94,230,168,.5);background:rgba(94,230,168,.08)}.outcome.oc-a b{color:#7ff0c4}
+.outcome.oc-d{border-color:rgba(185,194,214,.5)}.outcome.oc-n{border-color:rgba(255,138,138,.55);background:rgba(255,90,90,.08)}.outcome.oc-n b{color:#ffa0a0}
+.outcome.oc-u{border-color:rgba(255,210,122,.45)}.outcome.oc-u b{color:#ffe0a3}
+.oc-t.oc-a{color:#7ff0c4}.oc-t.oc-n{color:#ffa0a0}.oc-t.oc-u{color:#ffe0a3}.oc-t.oc-d{color:#d6dcea}
+.badge.nps{background:rgba(94,230,168,.12);color:#bff5dc}.badge.prob{background:rgba(255,210,122,.14);color:#ffe0a3;border:1px dashed #ffd27a}
+.badge.m411b{background:rgba(199,125,255,.16);color:#e3c7ff}
+.probable{margin:8px 0;padding:8px 10px;border-radius:10px;border:1px dashed rgba(255,210,122,.6);background:rgba(255,210,122,.06);font-size:13px}
+.probable b{display:block;color:#ffe0a3}.probable ul{margin:4px 0 0;padding-left:18px;font-size:12px;color:var(--muted)}
+.m411{border:1px dashed rgba(199,125,255,.5);border-radius:12px;padding:8px 10px;background:rgba(199,125,255,.06)}.m411 p{font-size:13px;margin:4px 0}

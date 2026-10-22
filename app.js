@@ -55,6 +55,7 @@ const st = {
   manifest: null, pts: {}, loading: {}, grid: new Map(), community: [], communityFiltered: [], theories: [], waves: [], links: [], ctx: null,
   enabled: new Set(TYPES.filter(t => t.id !== "mass").map(t => t.id)), community_on: true,
   cred: [0, 100], uq: [0, 100], years: [1000, 2026], undated: true, q: "",
+  outcomes: new Set(["a", "d", "n", "u"]), m411: false,
   connections: false, autoconnect: true, days: 7, km: 150, style: "realistic", ctxOn: new Set(), visitorsOn: false,
   selected: null, arcs: [], detailCache: {}, mode: null, linkA: null, visitors: null, admin: null, filtered: []
 };
@@ -188,7 +189,8 @@ async function loadCityCells() {
 }
 /* ---- stacks: events at the same (or nearly the same) spot, e.g. city-centre geocodes ---- */
 const STACK_M = 110, STACK_CELL = 0.001;
-const PREC = { c: "Location approximate (city center)", s: "Location approximate (state level)", n: "Location approximate (country level)" };
+const PREC = { c: "Location approximate (city center)", s: "Location approximate (state level)", n: "Location approximate (country level)",
+  p: "Location approximate (park centroid)", a: "Location approximate (area or trailhead, not an exact last-seen point)" };
 function precNote(q) { return PREC[q] || ""; }
 function groupStacks(feats) {
   const buckets = new Map();
@@ -254,8 +256,8 @@ function renderStackList(sk, opts = {}) {
    <p class="hint">Showing events that match your current filters, best-scored first. Tap one to open it.</p>
    <ul class="stack-list">${sk.members.map(f => { const p = f.properties, t = TYPES[p.t]; return `<li><button type="button" data-id="${esc(p.i)}">
      <span class="sl-ic">${shapeSVG(t, 16)}</span><span class="sl-main"><span class="sl-t">${esc(p.n)}</span>
-     <span class="sl-m">${esc(t.label)} · <span data-date="${esc(p.i)}">${esc(fmtDate(p.d ? String(p.d).slice(0, 4) + "-" + String(p.d).slice(4, 6) : null))}</span>${p.q ? " · " + esc(precNote(p.q).replace("Location approximate", "approx.")) : ""}</span>
-     <span class="sl-p" data-prev="${esc(p.i)}"></span></span><span class="sl-s ${t.id === "mass" ? "uq" : ""}">${p.s}</span></button></li>`; }).join("")}</ul>`;
+     <span class="sl-m">${esc(t.label)} · <span data-date="${esc(p.i)}">${esc(fmtDate(p.d ? String(p.d).slice(0, 4) + "-" + String(p.d).slice(4, 6) : null))}</span>${p.o ? ` · <b class="oc-t oc-${p.o}">${esc(Object.fromEntries(OUTCOMES)[p.o])}</b>` : ""}${p.m ? " · Missing 411" : ""}${p.q ? " · " + esc(precNote(p.q).replace("Location approximate", "approx.").replace(/, not an exact.*\)/, ")")) : ""}</span>
+     <span class="sl-p" data-prev="${esc(p.i)}"></span></span><span class="sl-s ${t.id === "mass" || p.u ? "uq" : ""}">${p.s}</span></button></li>`; }).join("")}</ul>`;
   $("#detail-body").scrollTop = 0; openSheet("detail");
   if (!opts.noNav) navPush("list", "#list", () => closeSheetRaw("detail"), { data: sk, replaceKeys: ["event"].concat(isPhone() ? ["filters"] : []) });
   $("#detail-body").querySelector(".stack-list").onclick = e => { const b = e.target.closest("button[data-id]"); if (b) selectEvent(b.dataset.id); };
@@ -388,8 +390,10 @@ async function loadType(t) {
       const p = { i: t + "-" + i, t: ti, d: col.d[i], s: col.s[i], n: col.n[i] };
       if (cur.has(i)) p.c = 1; const k = col.k[i]; if (k) p.k = k; const w = col.w[i]; if (w !== undefined) p.w = w;
       const q = col.q && col.q[i] !== undefined ? col.q[i] : col.qd; if (q) p.q = q;
+      if (col.o && col.o[i]) p.o = col.o[i]; if (col.m && col.m[i]) p.m = col.m[i];
       feats[i] = { type: "Feature", geometry: { type: "Point", coordinates: [col.lon[i], col.lat[i]] }, properties: p };
     }
+    (col.u || []).forEach(i => feats[i].properties.u = 1); (col.pm || []).forEach(i => feats[i].properties.pm = 1);
     st.pts[t] = feats; indexGrid(feats); return feats;
   })();
   return st.loading[t];
@@ -418,10 +422,12 @@ async function applyFilters() {
   for (const t of TYPES) {
     const arr = st.pts[t.id]; totals[t.id] = arr ? arr.length : st.manifest.counts_by_type[t.id];
     if (!arr) continue;
-    const [lo, hi] = t.id === "mass" ? st.uq : st.cred, on = st.enabled.has(t.id);
+    const on = st.enabled.has(t.id), mass = t.id === "mass";
     for (const f of arr) {
-      const p = f.properties;
+      const p = f.properties, [lo, hi] = mass || p.u ? st.uq : st.cred;
       if (p.s < lo || p.s > hi) continue;
+      if (p.o && !st.outcomes.has(p.o)) continue;
+      if (st.m411 && !p.m) continue;
       if (p.d) { if (p.d < y0 || p.d > y1) continue; } else if (!st.undated) continue;
       if (q && !p.n.toLowerCase().includes(q)) continue;
       counts[t.id]++; if (on) out.push(f);
@@ -433,7 +439,7 @@ async function applyFilters() {
     if (s < lo || s > hi) return false; const d = c.event_date ? +String(c.event_date).replace(/-/g, "") : 0;
     if (d) { if (d < y0 || d > y1) return false; } else if (!st.undated) return false;
     if (q && !(c.title + " " + (c.description || "")).toLowerCase().includes(q)) return false;
-    if (!st.enabled.has(c.type)) return false; cc++; return st.community_on;
+    if (!st.enabled.has(c.type) || st.m411) return false; cc++; return st.community_on;
   });
   st.filtered = out; st.mapFeats = groupStacks(out); st.counts = counts; st.totals = totals; st.communityCount = cc;
   const shown = out.length + st.communityFiltered.length;
@@ -447,9 +453,36 @@ function renderTypeList() {
   const rows = TYPES.map(t => `<li><button data-type="${t.id}" aria-pressed="${st.enabled.has(t.id)}"><span class="dot">${shapeSVG(t, 16)}</span><span class="tl">${esc(t.label)}${t.sub ? `<span class="sub">${t.sub}</span>` : ""}</span><span class="tc">${st.counts ? fmtN(st.counts[t.id]) : "…"}</span></button></li>`);
   rows.push(`<li><button data-type="community" aria-pressed="${st.community_on}"><span class="dot">${shapeSVG(null, 16, true)}</span><span class="tl">Community reports<span class="sub">${S.available === false || !S.enabled ? "Not enabled yet" : "Unreviewed, user-submitted"}</span></span><span class="tc">${fmtN(st.communityCount || 0)}</span></button></li>`);
   $("#type-list").innerHTML = rows.join("");
-  $("#uq-wrap").hidden = !st.enabled.has("mass");
+  $("#uq-wrap").hidden = !st.enabled.has("mass") && !st.enabled.has("disappearance");
+  renderMissingFilters();
 }
 
+/* ---- missing-person filters: outcome chips + Missing 411 toggle (only records that carry these fields are affected) ---- */
+const OUTCOMES = [["a", "Found alive"], ["d", "Found deceased"], ["n", "Never found"], ["u", "Unknown"]];
+function renderMissingFilters() {
+  const box = $("#missing-wrap"); if (!box) return;
+  box.hidden = !st.enabled.has("disappearance");
+  const arr = st.pts.disappearance || [], oc = { a: 0, d: 0, n: 0, u: 0 }; let m = 0;
+  for (const f of arr) { const p = f.properties; if (p.o) oc[p.o]++; if (p.m) m++; }
+  $("#outcome-chips").innerHTML = OUTCOMES.map(([k, l]) => `<button type="button" class="chip oc-${k}" data-oc="${k}" aria-pressed="${st.outcomes.has(k)}">${l} <small>${fmtN(oc[k])}</small></button>`).join("");
+  $("#m411-count").textContent = fmtN(m);
+}
+function outcomeHTML(o) {
+  if (!o) return "";
+  return `<div class="outcome oc-${o.code[0]}"><span class="oc-l">Outcome</span><b>${esc(o.label)}</b>${o.date ? ` <small>(${esc(fmtDate(o.date))})</small>` : ""}
+    ${o.note ? `<div class="oc-n">${esc(o.note)}</div>` : ""}</div>`;
+}
+function m411HTML(m) {
+  if (!m) return "";
+  return `<div class="sec m411"><h4>Missing 411 tag${m.confidence === "low" ? ": low confidence" : ""}</h4>
+    <p>${esc(m.ref || "Missing 411")}. <i>Missing 411</i> is a book and film series by David Paulides. The tag only notes that the case is reportedly covered there; the facts above come from independent sources, and no claims from the series are used or endorsed.</p>
+    ${m.note ? `<p class="hint">Tag basis: ${esc(m.note)}${m.url ? ` · <a href="${esc(m.url)}" target="_blank" rel="noopener">source</a>` : ""}</p>` : ""}</div>`;
+}
+function probableHTML(r) {
+  if (!r.probable) return "";
+  return `<div class="probable"><b>Probable match</b> Some records here were linked to this case on a probable basis (same park and a close date), not a confirmed one. They could belong to a different person or incident.
+    <ul>${r.probable.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
+}
 /* ------------------------------------------------------------ selection + detail */
 function clearSelection() {
   st.selected = null; st.arcs = [];
@@ -484,7 +517,7 @@ function scoreHTML(sc) {
       (sc.questions && sc.questions.length ? `<div class="sec"><h4>Documented open questions</h4><ul class="ev">${sc.questions.map(q => `<li>${esc(q.text)} <a href="${esc(q.source.url)}" target="_blank" rel="noopener">${esc(q.source.label)}</a></li>`).join("")}</ul></div>` : "");
   }
   return `<div class="score ${uq ? "uq" : ""}"><div class="score-top"><div class="gauge" style="--v:${sc.value}"><span>${sc.value}</span></div><div><div class="score-label">${uq ? "Unanswered-questions score" : "Credibility score"}</div>
-   <div class="score-sub">${uq ? "Scores the <b>why</b>: how unresolved the motive is per official findings. It does not measure whether it happened." : "Disproof weighs heavily; absence of disproof keeps the score up."}</div></div></div>
+   <div class="score-sub">${sc.sub ? esc(sc.sub) : uq ? "Scores the <b>why</b>: how unresolved the motive is per official findings. It does not measure whether it happened." : "Disproof weighs heavily; absence of disproof keeps the score up."}</div></div></div>
    ${extra}<table class="breakdown">${rows}<tr><td><b>Total</b> (clamped 0–100)</td><td><b>${sc.value}</b></td></tr></table></div>`;
 }
 function rumorsHTML(r) {
@@ -498,7 +531,8 @@ function rumorsHTML(r) {
 }
 function renderDetail(r) {
   const t = TYPES[TI[r.type]] || TYPES[7];
-  $("#detail-kicker").innerHTML = `<span class="badge" style="border:1px solid ${t.color}66">${shapeSVG(t, 13)}${esc(t.label)}</span>` + (r.community ? `<span class="badge unrev">Unreviewed community report</span>` : r.src === "curated" ? `<span class="badge cur">Curated case</span>` : "");
+  $("#detail-kicker").innerHTML = `<span class="badge" style="border:1px solid ${t.color}66">${shapeSVG(t, 13)}${esc(t.label)}</span>` + (r.community ? `<span class="badge unrev">Unreviewed community report</span>` : r.src === "curated" ? `<span class="badge cur">Curated case</span>` : r.src === "np-missing" ? `<span class="badge nps">NPS missing-person record</span>` : "")
+    + (r.probable ? `<span class="badge prob">Probable match</span>` : "") + (r.missing411 ? `<span class="badge m411b">Missing 411${r.missing411.confidence === "low" ? " (low confidence)" : ""}</span>` : "");
   const imgs = (r.images || []).map(im => `<figure class="img-fig"><img loading="lazy" src="${esc(im.src)}${V}" alt="${esc(r.title)}"><figcaption>${esc(im.credit)} · ${esc(im.license)} · <a href="${esc(im.page)}" target="_blank" rel="noopener">Wikimedia Commons</a></figcaption></figure>`).join("");
   const ex = (r.excerpts || []).map(e => `<blockquote>“${esc(e.text)}”<cite>— ${esc(e.by)}</cite></blockquote>`).join("");
   const srcs = (r.sources || []).slice(), gen = st.manifest.sources[r.src];
@@ -506,7 +540,7 @@ function renderDetail(r) {
   const lic = r.license || (gen && gen.license) || "";
   $("#detail-body").innerHTML = `<h2 class="d-title">${esc(r.title)}</h2>
    <div class="d-meta">📅 ${esc(fmtDate(r.date))}${r.time ? " " + esc(r.time) : ""} · 📍 ${esc(r.place || "")}</div>${precNote(r.q) ? `<div class="approx">⚠️ ${precNote(r.q)}</div>` : ""}
-   ${imgs}<p>${esc(r.summary || "")}</p>${scoreHTML(r.score)}
+   ${outcomeHTML(r.outcome)}${imgs}<p>${esc(r.summary || "")}</p>${probableHTML(r)}${r.link_confidence === "low" ? `<div class="approx">Park connection: low confidence. The source ties this case to the park only loosely (for example, a vehicle or item found there).</div>` : ""}${scoreHTML(r.score)}${m411HTML(r.missing411)}
    ${ex ? `<div class="sec"><h4>Witness statements</h4>${ex}</div>` : ""}
    ${(r.evidence || []).length ? `<div class="sec"><h4>Evidence notes</h4><ul class="ev">${r.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
    ${r.photo ? `<figure class="img-fig"><img loading="lazy" src="${esc(r.photo)}" alt="Submitted photo"><figcaption>Photo submitted with this unreviewed report</figcaption></figure>` : ""}
@@ -842,6 +876,8 @@ function wireUI() {
   $("#q").oninput = e => { st.q = e.target.value; scheduleFilter(); };
   wireDual("cred-range", "cred", "#cred-out", (a, b) => `${a}–${b}`);
   wireDual("uq-range", "uq", "#uq-out", (a, b) => `${a}–${b}`);
+  $("#outcome-chips").onclick = e => { const b = e.target.closest("[data-oc]"); if (!b) return; const k = b.dataset.oc; st.outcomes.has(k) ? st.outcomes.delete(k) : st.outcomes.add(k); applyFilters(); };
+  $("#m411-toggle").onchange = e => { st.m411 = e.target.checked; applyFilters(); };
   wireDual("date-range", "years", "#date-out", (a, b) => `${a}–${b}`);
   $("#chk-undated").onchange = e => { st.undated = e.target.checked; scheduleFilter(); };
   const reconn = () => { if (st.selected) { computeArcs(st.selected); renderArcs(); renderDetailLinks(st.selected); } };
