@@ -11,11 +11,11 @@ const TYPES = [
   { id: "disappearance", label: "Disappearance (unexplained)", color: "#ff1f3d", shape: "hexagon" },
   { id: "mass", label: "Mass event: motive unexplained", color: "#f2f2f2", shape: "target", sub: "Documented tragedies · off by default" },
   { id: "other", label: "High strangeness / other", color: "#ffe500", shape: "cross" },
-  // atlas5: appended (type indices of earlier types stay stable). Each type belongs to exactly one exclusive view.
-  // Colour slot reserved for a future "Abduction" type: #00ffc8 (aqua-mint), not used by any type below.
+  // atlas5/6: appended (type indices of earlier types stay stable). Each type belongs to exactly one exclusive view.
   { id: "space", label: "Space / orbital anomaly", color: "#a970ff", shape: "sparkle", view: "atmos" },
   { id: "ug_anomaly", label: "Underground anomaly", color: "#e0a458", shape: "invtri", view: "under" },
-  { id: "ug_missing", label: "Underground disappearance", color: "#ff7eb6", shape: "pentagon", view: "under", sub: "Caves, mines, sinkholes, tunnels" }];
+  { id: "ug_missing", label: "Underground disappearance", color: "#ff7eb6", shape: "pentagon", view: "under", sub: "Caves, mines, sinkholes, tunnels" },
+  { id: "abduction", label: "Alien abduction (claimed)", color: "#00ffc8", shape: "chevron", view: "earth", sub: "Claimed, contested, and retracted accounts" }];
 TYPES.forEach(t => t.view = t.view || "earth");
 const VIEWS = { earth: "Earth", atmos: "Atmosphere", under: "Underground" };
 const COMMUNITY_COLOR = "#ffffff";
@@ -31,6 +31,7 @@ function shapePts(shape) {   // polygon vertices in a unit box centred on 0,0 (r
     case "sparkle": return Array.from({ length: 8 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 4, r = i % 2 ? 0.38 : 1.1; return [r * Math.cos(a), r * Math.sin(a)]; });
     case "invtri": return [[0, 1.05], [0.98, -0.72], [-0.98, -0.72]];
     case "pentagon": return poly(5, -Math.PI / 2);
+    case "chevron": return [[0, -1.05], [0.95, 0.15], [0.4, 0.15], [0.4, 1.0], [-0.4, 1.0], [-0.4, 0.15], [-0.95, 0.15]];
     case "cross": { const a = 0.36, b = 1.0; return [[-a, -b], [a, -b], [a, -a], [b, -a], [b, a], [a, a], [a, b], [-a, b], [-a, a], [-b, a], [-b, -a], [-a, -a]]; }
     default: return null;   // circle / target
   }
@@ -515,7 +516,7 @@ function probableHTML(r) {
   return `<div class="probable"><b>Probable match</b> Some records here were linked to this case on a probable basis (same park and a close date), not a confirmed one. They could belong to a different person or incident.
     <ul>${r.probable.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
 }
-/* ------------------------------------------------------------ atlas5: exclusive views (Earth / Atmosphere / Underground) */
+/* ------------------------------------------------------------ atlas5/6: exclusive views (Earth / Atmosphere / Underground) */
 // Atmosphere: pins are small fill-extrusion blocks floating at a compressed "visual altitude" above their ground point, with a thin tether.
 // Real altitudes are shown in the popup; the drawing is not to scale above low Earth orbit.
 const ATM = { deep: 1900, box: 4, boxH: 110, cap: 1700 };
@@ -786,7 +787,7 @@ function renderDetail(r) {
   if (gen && r.src !== "curated") srcs.push({ label: "Dataset: " + gen.name, url: gen.url });
   const lic = r.license || (gen && gen.license) || "";
   $("#detail-body").innerHTML = `<h2 class="d-title">${esc(r.title)}</h2>
-   <div class="d-meta">📅 ${esc(fmtDate(r.date))}${r.time ? " " + esc(r.time) : ""} · 📍 ${esc(r.place || "")}</div>${precNote(r.q) ? `<div class="approx">⚠️ ${precNote(r.q)}</div>` : ""}
+   <div class="d-meta">📅 ${esc(fmtDate(r.date))}${r.time ? " " + esc(r.time) : ""} · 📍 ${esc(r.place || "")}</div>${precNote(r.q) ? `<div class="approx">⚠️ ${precNote(r.q)}</div>` : ""}${r.loc_note ? `<div class="approx">📍 ${esc(r.loc_note)}</div>` : ""}
    ${heightHTML(r)}${outcomeHTML(r.outcome)}${imgs}<p>${esc(r.summary || "")}</p>${probableHTML(r)}${r.link_confidence === "low" ? `<div class="approx">Park connection: low confidence. The source ties this case to the park only loosely (for example, a vehicle or item found there).</div>` : ""}${scoreHTML(r.score)}${m411HTML(r.missing411)}
    ${ex ? `<div class="sec"><h4>Witness statements</h4>${ex}</div>` : ""}
    ${(r.evidence || []).length ? `<div class="sec"><h4>Evidence notes</h4><ul class="ev">${r.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
@@ -972,7 +973,8 @@ function openAddForm(lngLat, placeName) {
   if (notEnabled()) { toast("Community reports aren't enabled yet."); return; }
   setMode(null);
   let place = placeName || `${lngLat.lat.toFixed(4)}, ${lngLat.lng.toFixed(4)}`;
-  const opts = TYPES.filter(t => t.id !== "mass").map(t => `<option value="${t.id}">${esc(t.label)}</option>`).join("");
+  const COMMUNITY_TYPES = new Set(["ufo","bluebook","cryptid","sound","phenomenon","disappearance","other"]);  // matches supabase-atlas.sql; mass/space/ug_*/abduction not accepted there yet
+  const opts = TYPES.filter(t => COMMUNITY_TYPES.has(t.id)).map(t => `<option value="${t.id}">${esc(t.label)}</option>`).join("");
   modal("Add an event", `<form class="form" id="add-form" novalidate>
     <p class="hint">📍 <span id="af-place">${esc(place)}</span><br>Reports appear right away with an “Unreviewed community report” badge and are scored with the same rubric.</p>
     <label class="f" for="af-type">Type</label><select class="field" id="af-type">${opts}</select>
@@ -1219,7 +1221,7 @@ async function boot() {
     await initMap(stylePromise);
     await new Promise(r => map.loaded() ? r() : map.once("load", r));
     $("#loading").classList.add("done");
-    await loadType("ufo"); await applyFilters();
+    await Promise.all(["ufo", "abduction"].map(loadType)); await applyFilters();
     loadCities();
     window.Atlas.ready = true;
     const m = location.hash.match(/#(?:event|e)=([^&]+)/), mv = location.hash.match(/#view=(atmos|under|earth)/), mp = /^#parks\b/.test(location.hash);

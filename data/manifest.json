@@ -1,9 +1,45 @@
 {
  "name": "Anomaly Atlas",
  "aliases": {
-  "sound-12": "space-11"
+  "sound-12": "space-11",
+  "ufo-579": "abduction-34",
+  "ufo-2105": "abduction-35",
+  "ufo-10147": "abduction-36",
+  "ufo-18806": "abduction-37",
+  "ufo-30583": "abduction-38",
+  "ufo-35044": "abduction-39",
+  "ufo-40159": "abduction-40",
+  "ufo-45770": "abduction-41",
+  "ufo-50122": "abduction-42",
+  "ufo-51366": "abduction-43",
+  "ufo-51660": "abduction-44",
+  "ufo-51694": "abduction-45",
+  "ufo-51699": "abduction-46",
+  "ufo-52614": "abduction-47",
+  "ufo-53013": "abduction-48",
+  "ufo-56739": "abduction-49",
+  "ufo-57400": "abduction-50",
+  "ufo-57404": "abduction-51",
+  "ufo-58640": "abduction-52",
+  "ufo-58717": "abduction-53",
+  "ufo-60250": "abduction-54",
+  "ufo-60265": "abduction-55",
+  "ufo-68932": "abduction-56",
+  "ufo-69342": "abduction-57",
+  "ufo-70524": "abduction-58",
+  "ufo-70542": "abduction-59",
+  "ufo-72221": "abduction-60",
+  "ufo-78363": "abduction-61",
+  "ufo-79676": "abduction-62",
+  "ufo-79739": "abduction-63",
+  "ufo-82870": "abduction-64",
+  "ufo-82878": "abduction-65",
+  "ufo-83710": "abduction-66",
+  "ufo-8": "abduction-0",
+  "ufo-9": "abduction-1",
+  "ufo-10": "abduction-2"
  },
- "built": "2026-10-22T14:41:18",
+ "built": "2026-10-22T16:17:37",
  "types": [
   "ufo",
   "bluebook",
@@ -15,13 +51,14 @@
   "other",
   "space",
   "ug_anomaly",
-  "ug_missing"
+  "ug_missing",
+  "abduction"
  ],
  "files": {
   "ufo": {
    "points": "data/points/ufo.json",
-   "bytes": 5992555,
-   "count": 87214,
+   "bytes": 5992763,
+   "count": 87178,
    "chunks": 219,
    "chunk_size": 400
   },
@@ -94,6 +131,13 @@
    "count": 10,
    "chunks": 1,
    "chunk_size": 400
+  },
+  "abduction": {
+   "points": "data/points/abduction.json",
+   "bytes": 5509,
+   "count": 67,
+   "chunks": 1,
+   "chunk_size": 400
   }
  },
  "counts_by_source": {
@@ -108,7 +152,8 @@
    "mass": 8,
    "space": 17,
    "ug_anomaly": 15,
-   "ug_missing": 9
+   "ug_missing": 9,
+   "abduction": 34
   },
   "bluebook": {
    "bluebook": 9957
@@ -124,10 +169,13 @@
   },
   "ug-dup": {
    "ug_missing": 1
+  },
+  "nuforc-abd": {
+   "abduction": 33
   }
  },
  "counts_by_type": {
-  "ufo": 87214,
+  "ufo": 87178,
   "bluebook": 9962,
   "cryptid": 4061,
   "sound": 15,
@@ -137,9 +185,10 @@
   "other": 14,
   "space": 17,
   "ug_anomaly": 15,
-  "ug_missing": 10
+  "ug_missing": 10,
+  "abduction": 67
  },
- "total": 103982,
+ "total": 104013,
  "sources": {
   "nuforc": {
    "id": "nuforc",
@@ -176,7 +225,7 @@
   }
  },
  "waves": 36,
- "links": 30,
+ "links": 73,
  "keywords": [
   "triangle",
   "orb",
