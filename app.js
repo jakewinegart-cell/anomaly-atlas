@@ -523,19 +523,21 @@ const ATM = { deep: 1900, box: 4, boxH: 110, cap: 1700 };
 function visAltKm(km) { if (km == null) return ATM.deep; return km <= 600 ? km : Math.min(ATM.cap, 600 + 330 * Math.log10(km / 600)); }
 function sqPoly(lon, lat, half) { const k = half / Math.max(0.25, Math.cos(lat * Math.PI / 180)); return [[[lon - k, lat - half], [lon + k, lat - half], [lon + k, lat + half], [lon - k, lat + half], [lon - k, lat - half]]]; }
 function atmosFeats(list) {
-  const out = [];
+  // Pin boxes + tethers stay on the interactive atmos source. Decorative orbit rings go on a separate
+  // source so they cannot steal queryRenderedFeatures from space pins (a common "click does nothing" cause).
+  const pins = [], rings = [];
   for (const f of list) {
     const p = f.properties, [lon, lat] = f.geometry.coordinates, t = TYPES[p.t], base = visAltKm(p.h) * 1000;
     const sel = st.selected && st.selected.id === p.i;
-    out.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lon, lat, ATM.box / 2) }, properties: { i: p.i, n: p.n, k: "box", col: sel ? "#ffffff" : t.color, b: base, top: base + ATM.boxH * 1000 } });
-    out.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lon, lat, 0.22) }, properties: { i: p.i, n: p.n, k: "tether", col: t.color, b: 0, top: base } });
+    pins.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lon, lat, ATM.box / 2) }, properties: { i: p.i, n: p.n, k: "box", col: sel ? "#ffffff" : t.color, b: base, top: base + ATM.boxH * 1000 } });
+    pins.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lon, lat, 0.22) }, properties: { i: p.i, n: p.n, k: "tether", col: t.color, b: 0, top: base } });
   }
   // decorative orbit rings (not data): ISS-like 51.6° inclined orbit at ~420 km and the geostationary belt (compressed, not to scale)
   const ring = (inc, altKm, n, size, col, label) => { for (let j = 0; j < n; j++) { const u = j / n * 2 * Math.PI, la = Math.asin(Math.sin(inc * Math.PI / 180) * Math.sin(u)) * 180 / Math.PI;
     const lo = Math.atan2(Math.cos(inc * Math.PI / 180) * Math.sin(u), Math.cos(u)) * 180 / Math.PI, b = visAltKm(altKm) * 1000;
-    out.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lo, la, size) }, properties: { k: "ring", col, b, top: b + 12000, n: label } }); } };
+    rings.push({ type: "Feature", geometry: { type: "Polygon", coordinates: sqPoly(lo, la, size) }, properties: { k: "ring", col, b, top: b + 12000, n: label } }); } };
   if (st.view === "atmos") { ring(51.6, 420, 140, 0.35, "#7fd7ff", "ISS-like orbit, ~420 km"); ring(0, 35786, 160, 0.35, "#c9b6ff", "Geostationary belt, 35,786 km (not to scale)"); }
-  return out;
+  return { pins, rings };
 }
 const UG = { maxD: 13000 };
 function mixHex(a, b, f) { const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16), ch = (x, s) => (x >> s) & 255; return "#" + [16, 8, 0].map(s => Math.round(ch(pa, s) * (1 - f) + ch(pb, s) * f).toString(16).padStart(2, "0")).join(""); }
@@ -547,12 +549,24 @@ function underFeats(list) {
 }
 function addViewLayers() {
   const empty = { type: "FeatureCollection", features: [] };
-  ["atmos", "atmos-ground", "under"].forEach(id => map.addSource(id, { type: "geojson", data: empty }));
+  ["atmos", "atmos-rings", "atmos-ground", "under"].forEach(id => map.addSource(id, { type: "geojson", data: empty }));
   // surface dimmer: a world polygon under borders and labels (Atmosphere: slightly dimmed; Underground: darkened "cut-away" ground)
   map.addSource("dim", { type: "geojson", data: { type: "Feature", geometry: { type: "Polygon", coordinates: [[[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]]] }, properties: {} } });
   const firstLabel = (map.getStyle().layers.find(l => /^boundary|^label|^water_name|^place/.test(l.id) || l.type === "symbol") || {}).id;
   map.addLayer({ id: "view-dim", type: "fill", source: "dim", layout: { visibility: "none" }, paint: { "fill-color": "#05060f", "fill-opacity": 0.6, "fill-antialias": false } }, firstLabel && map.getLayer(firstLabel) ? firstLabel : undefined);
-  map.addLayer({ id: "atmos-ground", type: "circle", source: "atmos-ground", paint: { "circle-radius": 4, "circle-color": ["get", "col"], "circle-stroke-color": "#fff", "circle-stroke-width": 1, "circle-opacity": 0.85 } });
+  // Ground markers for EVERY atmosphere pin (including illustrative positions). Fill-extrusion picking on the
+  // globe is unreliable at orbital altitudes, and pi pins previously had no circle hit-target at all.
+  map.addLayer({ id: "atmos-hit", type: "circle", source: "atmos-ground", paint: {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 14, 2, 18, 4, 22],
+    "circle-color": "#ffffff", "circle-opacity": 0.01, "circle-stroke-width": 0 } });
+  map.addLayer({ id: "atmos-ground", type: "circle", source: "atmos-ground", paint: {
+    "circle-radius": ["case", ["==", ["get", "pi"], 1], 5, 6],
+    "circle-color": ["get", "col"],
+    "circle-stroke-color": "#fff",
+    "circle-stroke-width": 1.2,
+    "circle-opacity": ["case", ["==", ["get", "pi"], 1], 0.55, 0.9],
+    "circle-stroke-opacity": ["case", ["==", ["get", "pi"], 1], 0.55, 1] } });
+  map.addLayer({ id: "atmos-rings", type: "fill-extrusion", source: "atmos-rings", paint: { "fill-extrusion-color": ["get", "col"], "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "top"], "fill-extrusion-opacity": 0.55, "fill-extrusion-vertical-gradient": true } });
   map.addLayer({ id: "atmos-x", type: "fill-extrusion", source: "atmos", paint: { "fill-extrusion-color": ["get", "col"], "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "top"], "fill-extrusion-opacity": 0.92, "fill-extrusion-vertical-gradient": true } });
   map.addLayer({ id: "under-halo", type: "circle", source: "under", paint: { "circle-radius": ["get", "r"], "circle-color": ["get", "halo"], "circle-opacity": 0.16, "circle-blur": 0.35, "circle-stroke-color": ["get", "halo"], "circle-stroke-width": 1.2, "circle-stroke-opacity": ["case", ["==", ["get", "ill"], 1], 0.35, 0.8] } });
   map.addLayer({ id: "under-core", type: "symbol", source: "under", layout: {
@@ -564,15 +578,29 @@ function applyViewLayers() {
   if (!map || !map.getLayer("view-dim")) return;
   const v = st.view, vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
   vis("view-dim", v !== "earth"); map.setPaintProperty("view-dim", "fill-opacity", v === "under" ? 0.62 : 0.28);
-  ["atmos-x", "atmos-ground"].forEach(id => vis(id, v === "atmos")); ["under-halo", "under-core"].forEach(id => vis(id, v === "under"));
+  ["atmos-x", "atmos-rings", "atmos-ground", "atmos-hit"].forEach(id => vis(id, v === "atmos")); ["under-halo", "under-core"].forEach(id => vis(id, v === "under"));
   ["ctx-pts", "ctx-lbl", "visitors", "waves", "theories", "theories-lbl", "community", "arcs", "arcs-case", "arcs-hit"].forEach(id => vis(id, v === "earth"));
   setupSky();
 }
 function renderViewFeats() {
   if (!map || !map.getSource("atmos")) return;
   const list = st.viewFeats || [];
-  map.getSource("atmos").setData({ type: "FeatureCollection", features: st.view === "atmos" ? atmosFeats(list) : [] });
-  map.getSource("atmos-ground").setData({ type: "FeatureCollection", features: st.view === "atmos" ? list.filter(f => !f.properties.pi).map(f => ({ type: "Feature", geometry: f.geometry, properties: { i: f.properties.i, n: f.properties.n, col: TYPES[f.properties.t].color } })) : [] });
+  const empty = { type: "FeatureCollection", features: [] };
+  if (st.view === "atmos") {
+    const { pins, rings } = atmosFeats(list);
+    map.getSource("atmos").setData({ type: "FeatureCollection", features: pins });
+    if (map.getSource("atmos-rings")) map.getSource("atmos-rings").setData({ type: "FeatureCollection", features: rings });
+    // Always draw a ground hit-target, including illustrative (pi) positions — otherwise most space pins
+    // only existed as tall fill-extrusions, which MapLibre often fails to pick on the globe.
+    map.getSource("atmos-ground").setData({ type: "FeatureCollection", features: list.map(f => ({
+      type: "Feature", geometry: f.geometry,
+      properties: { i: f.properties.i, n: f.properties.n, col: TYPES[f.properties.t].color, pi: f.properties.pi ? 1 : 0 }
+    })) });
+  } else {
+    map.getSource("atmos").setData(empty);
+    if (map.getSource("atmos-rings")) map.getSource("atmos-rings").setData(empty);
+    map.getSource("atmos-ground").setData(empty);
+  }
   map.getSource("under").setData({ type: "FeatureCollection", features: st.view === "under" ? underFeats(list) : [] });
 }
 // Atmosphere glow: a soft shell drawn around the globe's limb (decorative; the thin Kármán line at 100 km would be invisible at this scale)
@@ -1183,8 +1211,23 @@ function wireMapEvents() {
   map.on("click", e => { if (!was() && st.spider) setTimeout(() => { if (!was()) unspiderfy(); }, 0); });
   ["zoomstart", "rotatestart", "pitchstart"].forEach(ev => map.on(ev, () => unspiderfy()));
   map.on("click", "community", e => { mark(); selectEvent(e.features[0].properties.id); });
-  map.on("click", "atmos-x", e => { if (was()) return; const f = e.features.find(x => x.properties.i); if (!f) { const r = e.features[0]; if (r && r.properties.n) { mark(); popup.setLngLat(e.lngLat).setHTML(`<div class="why">${esc(r.properties.n)}</div>`).addTo(map); setTimeout(() => popup.remove(), 4000); } return; } mark(); selectEvent(f.properties.i); });
-  map.on("click", "atmos-ground", e => { if (was()) return; mark(); selectEvent(e.features[0].properties.i); });
+  const pickAtmos = e => { if (was()) return; const f = (e.features || []).find(x => x.properties && x.properties.i); if (!f) return; mark(); selectEvent(f.properties.i); };
+  map.on("click", "atmos-x", pickAtmos);
+  map.on("click", "atmos-ground", pickAtmos);
+  map.on("click", "atmos-hit", pickAtmos);
+  map.on("click", "atmos-rings", e => { if (was()) return; const r = e.features && e.features[0]; if (r && r.properties.n) { mark(); popup.setLngLat(e.lngLat).setHTML(`<div class="why">${esc(r.properties.n)}</div>`).addTo(map); setTimeout(() => popup.remove(), 4000); } });
+  // Proximity fallback: if a click in Atmosphere view missed every layer (common with tall extrusions),
+  // open the nearest space pin within ~40 px of the tap.
+  map.on("click", e => {
+    if (was() || st.view !== "atmos" || st.mode) return;
+    const list = st.viewFeats || []; if (!list.length) return;
+    let best = null, bestD = 40;
+    for (const f of list) {
+      const p = map.project(f.geometry.coordinates), d = Math.hypot(p.x - e.point.x, p.y - e.point.y);
+      if (d < bestD) { bestD = d; best = f; }
+    }
+    if (best) { mark(); selectEvent(best.properties.i); }
+  });
   map.on("click", "under-core", e => { if (was()) return; mark(); selectEvent(e.features[0].properties.i); });
   map.on("click", "under-halo", e => { if (was()) return; mark(); selectEvent(e.features[0].properties.i); });
   map.on("click", "clusters", async e => {
@@ -1200,7 +1243,7 @@ function wireMapEvents() {
   map.on("click", "arcs-hit", e => { if (was()) return; mark(); hoverWhy(e, "Why linked:"); setTimeout(() => popup.remove(), 6000); });
   map.on("click", "theories-hit", e => { if (was()) return; mark(); hoverWhy(e, "💭 Community theory, speculation:"); setTimeout(() => popup.remove(), 8000); });
   map.on("click", "ctx-pts", e => { if (was()) return; mark(); const p = e.features[0].properties; new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<b>${esc(p.name)}</b><br><small>${esc(p.k)}${p.info ? " · " + esc(p.info) : ""}</small>`).addTo(map); });
-  ["clusters", "stacks", "spider-pts", "pts", "community", "waves", "ctx-pts", "atmos-x", "atmos-ground", "under-core", "under-halo"].forEach(l => { map.on("mouseenter", l, () => { if (!st.mode) map.getCanvas().style.cursor = "pointer"; }); map.on("mouseleave", l, () => { if (!st.mode) map.getCanvas().style.cursor = ""; }); });
+  ["clusters", "stacks", "spider-pts", "pts", "community", "waves", "ctx-pts", "atmos-x", "atmos-rings", "atmos-ground", "atmos-hit", "under-core", "under-halo"].forEach(l => { map.on("mouseenter", l, () => { if (!st.mode) map.getCanvas().style.cursor = "pointer"; }); map.on("mouseleave", l, () => { if (!st.mode) map.getCanvas().style.cursor = ""; }); });
   map.on("click", e => { setTimeout(() => { if (st.mode === "add" && !was()) openAddForm(e.lngLat); }, 0); });
   map.on("contextmenu", e => { if (!notEnabled()) openAddForm(e.lngLat); });
   let lp; map.on("touchstart", e => { if (!e.originalEvent.touches || e.originalEvent.touches.length !== 1) return; const ll = e.lngLat; lp = setTimeout(() => { if (notEnabled()) return toast("Community reports aren't enabled yet."); if (navigator.vibrate) navigator.vibrate(30); openAddForm(ll); }, 650); });
