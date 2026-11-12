@@ -66,7 +66,7 @@ const fmtN = n => n.toLocaleString("en-US");
 const st = {
   manifest: null, pts: {}, loading: {}, grid: new Map(), community: [], communityFiltered: [], theories: [], waves: [], links: [], ctx: null,
   enabled: new Set(TYPES.filter(t => t.id !== "mass").map(t => t.id)), community_on: true,
-  cred: [0, 100], uq: [0, 100], years: [1000, 2026], undated: true, q: "",
+  cred: [0, 100], uq: [0, 100], years: [1000, 2026], era: [1000, 2026], eraMin: 1000, visibleIds: null, undated: true, q: "",
   outcomes: new Set(["a", "d", "n", "u"]), m411: false,
   connections: false, autoconnect: true, days: 7, km: 150, style: "realistic", ctxOn: new Set(), visitorsOn: false,
   selected: null, arcs: [], detailCache: {}, mode: null, linkA: null, visitors: null, admin: null, filtered: [], view: "earth", viewFeats: []
@@ -420,7 +420,7 @@ async function loadType(t) {
     (col.x || []).forEach(i => feats[i].properties.x = 1);   // tombstone of an entry moved to another type (keeps ids stable; never shown)
     if (col.h) col.h.forEach((h, i) => { if (h !== -1) feats[i].properties.h = h; });
     (col.pi || []).forEach(i => feats[i].properties.pi = 1); (col.hi || []).forEach(i => feats[i].properties.hi = 1);
-    st.pts[t] = feats; indexGrid(feats); return feats;
+    st.pts[t] = feats; indexGrid(feats); syncEraBounds(); return feats;
   })();
   return st.loading[t];
 }
@@ -444,7 +444,7 @@ function scheduleFilter() { clearTimeout(fTimer); fTimer = setTimeout(applyFilte
 async function applyFilters() {
   const need = [...st.enabled].filter(t => !st.pts[t] && inView(t));
   if (need.length) await Promise.all(need.map(loadType));
-  const q = st.q.trim().toLowerCase(), y0 = st.years[0] * 10000, y1 = st.years[1] * 10000 + 1231;
+  const q = st.q.trim().toLowerCase(), y0 = Math.max(st.years[0], st.era[0]) * 10000, y1 = Math.min(st.years[1], st.era[1]) * 10000 + 1231;
   const out = [], counts = Object.fromEntries(TYPES.map(t => [t.id, 0])), totals = {};
   for (const t of TYPES) {
     if (!inView(t)) continue;
@@ -472,12 +472,15 @@ async function applyFilters() {
   });
   const earth = st.view === "earth";
   st.filtered = out; st.mapFeats = earth ? groupStacks(out) : []; st.viewFeats = earth ? [] : out; st.counts = counts; st.totals = totals; st.communityCount = cc;
+  st.visibleIds = new Set(out.map(f => f.properties.i));
+  for (const c of st.communityFiltered) st.visibleIds.add("c:" + c.id);
   const shown = out.length + st.communityFiltered.length;
   const all = Object.values(totals).reduce((a, b) => a + b, 0) + (earth ? st.community.length : 0);
   $("#total-shown").textContent = fmtN(shown); $("#total-all").textContent = fmtN(all);
   $("#count-badge").textContent = shown >= 1000 ? (shown / 1000).toFixed(shown >= 1e4 ? 0 : 1) + "k" : shown;
   renderTypeList();
   if (map && map.getSource("events")) { clearDonuts(); unspiderfy(); map.getSource("events").setData({ type: "FeatureCollection", features: st.mapFeats }); renderCommunity(); renderViewFeats(); }
+  refreshConnections();
 }
 function renderTypeList() {
   const rows = TYPES.filter(inView).map(t => `<li><button data-type="${t.id}" aria-pressed="${st.enabled.has(t.id)}"><span class="dot">${shapeSVG(t, 16)}</span><span class="tl">${esc(t.label)}${t.sub ? `<span class="sub">${t.sub}</span>` : ""}</span><span class="tc">${st.counts ? fmtN(st.counts[t.id]) : "…"}</span></button></li>`);
@@ -832,6 +835,55 @@ function renderDetail(r) {
   $("#d-share").onclick = () => { const u = shareURL(r.id); if (navigator.share && isPhone()) navigator.share({ title: r.title, url: u }).catch(() => {}); else if (navigator.clipboard) navigator.clipboard.writeText(u).then(() => toast("Link copied")); };
 }
 
+/* ------------------------------------------------------------ year-range helpers (atlas8 slider + existing filter) */
+function isVisibleId(id) { if (!id) return false; if (!st.visibleIds) return true; return st.visibleIds.has(id) || st.visibleIds.has("c:" + id); }
+function refreshConnections() {
+  if (st.selected && isVisibleId(st.selected.id)) { computeArcs(st.selected); renderArcs(); renderDetailLinks(st.selected); }
+  else { st.arcs = []; renderArcs(); }
+  renderTheories();
+}
+function eraFill() {
+  const a = $("#era-start"), b = $("#era-end"), fill = $("#era-fill"); if (!a || !b || !fill) return;
+  const min = +a.min, max = +a.max, span = max - min || 1;
+  const x = ((+a.value - min) / span) * 100, y = ((+b.value - min) / span) * 100;
+  fill.style.left = x + "%"; fill.style.width = Math.max(0, y - x) + "%";
+}
+function scanEraMin() {
+  let lo = 2026, found = false;
+  for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr) continue; for (const f of arr) { const d = f.properties.d; if (d) { found = true; lo = Math.min(lo, Math.floor(d / 10000)); } } }
+  return found ? lo : 1000;
+}
+function syncEraBounds() {
+  const a = $("#era-start"), b = $("#era-end"); if (!a || !b) return;
+  const lo = scanEraMin(), oldMin = +a.min, leftAtMin = +a.value === oldMin;
+  a.min = b.min = String(lo); a.max = b.max = "2026";
+  if (leftAtMin || +a.value < lo) a.value = String(lo);
+  if (+b.value < lo) b.value = String(lo);
+  if (+b.value > 2026) b.value = "2026";
+  st.eraMin = lo; st.era = [+a.value, +b.value];
+  $("#era-from").textContent = a.value; $("#era-to").textContent = b.value; eraFill();
+}
+function wireEra() {
+  const wrap = $("#era-range"), a = $("#era-start"), b = $("#era-end"); if (!wrap || !a || !b) return;
+  const commit = () => {
+    let x = +a.value, y = +b.value; if (x > y) { a.value = y; x = y; }
+    st.era = [x, y]; $("#era-from").textContent = x; $("#era-to").textContent = y; eraFill(); scheduleFilter();
+  };
+  a.addEventListener("input", () => { if (+a.value > +b.value) a.value = b.value; commit(); });
+  b.addEventListener("input", () => { if (+b.value < +a.value) b.value = a.value; commit(); });
+  // On touch/click, raise the nearer handle so thumbs remain usable when they sit close together.
+  const prefer = ev => {
+    const p = ev.touches ? ev.touches[0] : ev; if (p.clientX == null) return;
+    const r = wrap.getBoundingClientRect(), min = +a.min, max = +a.max, w = r.width || 1;
+    const pa = ((+a.value - min) / (max - min || 1)) * w, pb = ((+b.value - min) / (max - min || 1)) * w, x = p.clientX - r.left;
+    const useA = Math.abs(x - pa) <= Math.abs(x - pb);
+    a.style.zIndex = useA ? 3 : 1; b.style.zIndex = useA ? 1 : 3;
+  };
+  wrap.addEventListener("pointerdown", prefer);
+  wrap.addEventListener("touchstart", prefer, { passive: true });
+  eraFill();
+}
+
 /* ------------------------------------------------------------ correlations (client-side) */
 function kwList(mask) { const k = st.manifest.keywords, o = []; for (let i = 0; i < k.length; i++) if (mask & (1 << i)) o.push(k[i]); return o; }
 function computeArcs(r) {
@@ -845,7 +897,7 @@ function computeArcs(r) {
   for (let a = Math.floor(lat) - dLat; a <= Math.floor(lat) + dLat; a++) for (let b = Math.floor(lon) - dLon; b <= Math.floor(lon) + dLon; b++) {
     const cell = st.grid.get(a * 1000 + b); if (!cell) continue;
     for (const f of cell) {
-      const p = f.properties; if (f === sel || !st.enabled.has(TYPES[p.t].id)) continue;
+      const p = f.properties; if (f === sel || !st.enabled.has(TYPES[p.t].id) || !isVisibleId(p.i)) continue;
       const [lo2, la2] = f.geometry.coordinates, dk = hav(lat, lon, la2, lo2); if (dk > X) continue;
       const sameWave = sp.w !== undefined && p.w === sp.w;
       let dt = null; if (ord != null && p.d) dt = Math.abs(dToOrd(p.d) - ord);
@@ -862,7 +914,7 @@ function computeArcs(r) {
   }
   if (r.src === "curated") for (const l of st.links) {
     const other = l.a === r.id ? l.b : l.b === r.id ? l.a : null; if (!other) continue;
-    const f = ptById(other); if (f && !cands.some(c => c.f === f)) cands.push({ f, s: l.s, why: l.why.concat(["curated link"]) });
+    const f = ptById(other); if (f && isVisibleId(other) && !cands.some(c => c.f === f)) cands.push({ f, s: l.s, why: l.why.concat(["curated link"]) });
   }
   cands.sort((a, b) => b.s - a.s);
   // one arc per distinct location (bulk datasets geocode to city centroids, so many reports share coordinates)
@@ -888,7 +940,7 @@ function renderArcs() {
   if (!map || !map.getSource("arcs")) return;
   const feats = (st.arcs || []).map(a => ({ type: "Feature", geometry: { type: "LineString", coordinates: arcLine(a.from, a.to) }, properties: { s: a.s, why: a.why.join(" · "), n: a.f.properties.n, col: (TYPES[a.f.properties.t] || {}).color } }));
   if (st.connections && !st.selected) for (const l of st.links) {
-    const fa = ptById(l.a), fb = ptById(l.b); if (!fa || !fb) continue;
+    const fa = ptById(l.a), fb = ptById(l.b); if (!fa || !fb || !isVisibleId(l.a) || !isVisibleId(l.b)) continue;
     feats.push({ type: "Feature", geometry: { type: "LineString", coordinates: arcLine(fa.geometry.coordinates, fb.geometry.coordinates) }, properties: { s: l.s, why: l.why.join(" · "), n: fa.properties.n + " ↔ " + fb.properties.n, col: (TYPES[fb.properties.t] || {}).color } });
   }
   map.getSource("arcs").setData({ type: "FeatureCollection", features: feats });
@@ -974,7 +1026,7 @@ function renderCommunity() {
 }
 function renderTheories() {
   if (!map || !map.getSource("theories")) return; const show = st.connections || st.mode === "link";
-  map.getSource("theories").setData({ type: "FeatureCollection", features: show ? st.theories.map(t => ({ type: "Feature", geometry: { type: "LineString", coordinates: arcLine([t.a_lon, t.a_lat], [t.b_lon, t.b_lat], -0.12) }, properties: { label: t.label, note: t.note || "", by: t.display_name || "anonymous" } })) : [] });
+  map.getSource("theories").setData({ type: "FeatureCollection", features: show ? st.theories.filter(t => isVisibleId(t.a_id) && isVisibleId(t.b_id)).map(t => ({ type: "Feature", geometry: { type: "LineString", coordinates: arcLine([t.a_lon, t.a_lat], [t.b_lon, t.b_lat], -0.12) }, properties: { label: t.label, note: t.note || "", by: t.display_name || "anonymous" } })) : [] });
 }
 
 /* ------------------------------------------------------------ modes: add event, theory link */
@@ -1158,6 +1210,7 @@ function wireUI() {
   $("#outcome-chips").onclick = e => { const b = e.target.closest("[data-oc]"); if (!b) return; const k = b.dataset.oc; st.outcomes.has(k) ? st.outcomes.delete(k) : st.outcomes.add(k); applyFilters(); };
   $("#m411-toggle").onchange = e => { st.m411 = e.target.checked; applyFilters(); };
   wireDual("date-range", "years", "#date-out", (a, b) => `${a}–${b}`);
+  wireEra();
   $("#chk-undated").onchange = e => { st.undated = e.target.checked; scheduleFilter(); };
   const reconn = () => { if (st.selected) { computeArcs(st.selected); renderArcs(); renderDetailLinks(st.selected); } };
   $("#chk-autoconnect").onchange = e => { st.autoconnect = e.target.checked; reconn(); };
@@ -1166,6 +1219,7 @@ function wireUI() {
   $("#btn-reset").onclick = () => {
     st.enabled = new Set(TYPES.filter(t => t.id !== "mass").map(t => t.id)); st.community_on = true; st.m411 = false; $("#m411-toggle").checked = false; st.outcomes = new Set(["a", "d", "n", "u"]); st.q = ""; $("#q").value = ""; st.undated = true; $("#chk-undated").checked = true;
     [["cred-range", 0, 100], ["uq-range", 0, 100], ["date-range", 1000, 2026]].forEach(([id, a, b]) => { const [x, y] = $$(`#${id} input`); x.value = a; y.value = b; x.oninput(); });
+    const ea = $("#era-start"), eb = $("#era-end"); if (ea && eb) { ea.value = st.eraMin || ea.min; eb.value = 2026; st.era = [+ea.value, +eb.value]; $("#era-from").textContent = ea.value; $("#era-to").textContent = eb.value; eraFill(); }
   };
   $("#btn-connections").onclick = () => { st.connections = !st.connections; syncConnBtn(); renderWaves(); renderTheories(); renderArcs(); toast(st.connections ? "Connections on: report waves (yellow rings), curated links and community theories" : "Connections off"); };
   $("#btn-add").onclick = startAddMode;

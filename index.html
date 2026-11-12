@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#05060f">
 <title>Anomaly Atlas: a globe of unexplained events</title>
 <meta name="description" content="Explore UFO sightings, Project Blue Book cases, cryptids, strange sounds, phenomena and mysteries on a zoomable 3D globe, each with a transparent credibility score.">
-<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas7">
-<link rel="stylesheet" href="styles.css?v=atlas7">
+<link rel="stylesheet" href="vendor/maplibre-gl.css?v=atlas8">
+<link rel="stylesheet" href="styles.css?v=atlas8">
 </head>
 <body>
 <div id="stars" aria-hidden="true"></div>
@@ -117,13 +117,27 @@
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <div id="loading" class="loading"><div class="orbit"><i></i></div><p id="loading-text">Loading the atlas…</p></div>
 
+
+<div id="era" class="era-bar" role="group" aria-label="Year range">
+  <div class="era-labels">
+    <output id="era-from" for="era-start">1000</output>
+    <span class="era-title">Years</span>
+    <output id="era-to" for="era-end">2026</output>
+  </div>
+  <div class="range2" id="era-range">
+    <div class="era-fill" id="era-fill" aria-hidden="true"></div>
+    <input id="era-start" type="range" min="1000" max="2026" value="1000" step="1" aria-label="Start year">
+    <input id="era-end" type="range" min="1000" max="2026" value="2026" step="1" aria-label="End year">
+  </div>
+</div>
+
 <footer id="foot">
   <span>Anomaly Atlas · <a href="#" id="foot-about">Sources &amp; scoring</a> · Privacy: we count visits by approximate city only; no IPs or personal data are stored.</span>
 </footer>
 
-<script src="config.js?v=atlas7"></script>
-<script src="vendor/maplibre-gl.js?v=atlas7"></script>
-<script src="store.js?v=atlas7"></script>
-<script src="app.js?v=atlas7"></script>
+<script src="config.js?v=atlas8"></script>
+<script src="vendor/maplibre-gl.js?v=atlas8"></script>
+<script src="store.js?v=atlas8"></script>
+<script src="app.js?v=atlas8"></script>
 </body>
 </html>
