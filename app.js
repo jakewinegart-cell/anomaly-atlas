@@ -848,6 +848,46 @@ function eraFill() {
   const x = ((+a.value - min) / span) * 100, y = ((+b.value - min) / span) * 100;
   fill.style.left = x + "%"; fill.style.width = Math.max(0, y - x) + "%";
 }
+function eraThumbCenter(t, width, thumb) { return thumb / 2 + t * Math.max(0, width - thumb); }
+function eraBubbles() {
+  const wrap = $("#era-range"), a = $("#era-start"), b = $("#era-end");
+  const ba = $("#era-bubble-start"), bb = $("#era-bubble-end");
+  if (!wrap || !a || !b || !ba || !bb) return;
+  ba.textContent = a.value; bb.textContent = b.value;
+  const min = +a.min, max = +a.max, span = max - min || 1;
+  const wr = wrap.getBoundingClientRect(), w = wr.width || 1;
+  const thumb = w <= 400 ? 32 : 28;
+  let xa = eraThumbCenter((+a.value - min) / span, w, thumb);
+  let xb = eraThumbCenter((+b.value - min) / span, w, thumb);
+  const wa = ba.offsetWidth || 44, wb = bb.offsetWidth || 44, gap = 6, pad = 2;
+  // Nudge apart if the bubbles would overlap
+  const need = (wa + wb) / 2 + gap;
+  if (xb - xa < need) {
+    const mid = (xa + xb) / 2;
+    xa = mid - need / 2; xb = mid + need / 2;
+  }
+  const clamp = (x, hw) => Math.max(pad + hw, Math.min(w - pad - hw, x));
+  xa = clamp(xa, wa / 2); xb = clamp(xb, wb / 2);
+  if (xb - xa < need) {
+    if (xa <= pad + wa / 2 + 0.5) { xa = pad + wa / 2; xb = Math.min(w - pad - wb / 2, xa + need); }
+    else if (xb >= w - pad - wb / 2 - 0.5) { xb = w - pad - wb / 2; xa = Math.max(pad + wa / 2, xb - need); }
+  }
+  // Keep the bubbles inside the visual viewport on a phone
+  const vw = window.innerWidth, inset = 6;
+  const absA = wr.left + xa, absB = wr.left + xb;
+  if (absA - wa / 2 < inset) xa += inset - (absA - wa / 2);
+  if (absA + wa / 2 > vw - inset) xa -= (absA + wa / 2) - (vw - inset);
+  if (absB - wb / 2 < inset) xb += inset - (absB - wb / 2);
+  if (absB + wb / 2 > vw - inset) xb -= (absB + wb / 2) - (vw - inset);
+  ba.style.left = xa + "px"; bb.style.left = xb + "px";
+}
+function eraVisual() {
+  const a = $("#era-start"), b = $("#era-end"); if (!a || !b) return;
+  const x = +a.value, y = +b.value;
+  if ($("#era-from")) $("#era-from").textContent = x;
+  if ($("#era-to")) $("#era-to").textContent = y;
+  eraFill(); eraBubbles();
+}
 function scanEraMin() {
   let lo = 2026, found = false;
   for (const t of TYPES) { const arr = st.pts[t.id]; if (!arr) continue; for (const f of arr) { const d = f.properties.d; if (d) { found = true; lo = Math.min(lo, Math.floor(d / 10000)); } } }
@@ -861,13 +901,15 @@ function syncEraBounds() {
   if (+b.value < lo) b.value = String(lo);
   if (+b.value > 2026) b.value = "2026";
   st.eraMin = lo; st.era = [+a.value, +b.value];
-  $("#era-from").textContent = a.value; $("#era-to").textContent = b.value; eraFill();
+  eraVisual();
 }
 function wireEra() {
   const wrap = $("#era-range"), a = $("#era-start"), b = $("#era-end"); if (!wrap || !a || !b) return;
   const commit = () => {
     let x = +a.value, y = +b.value; if (x > y) { a.value = y; x = y; }
-    st.era = [x, y]; $("#era-from").textContent = x; $("#era-to").textContent = y; eraFill(); scheduleFilter();
+    st.era = [x, y];
+    eraVisual();          // labels + bubbles update on input, mid-drag, mouse or touch
+    scheduleFilter();
   };
   a.addEventListener("input", () => { if (+a.value > +b.value) a.value = b.value; commit(); });
   b.addEventListener("input", () => { if (+b.value < +a.value) b.value = a.value; commit(); });
@@ -881,7 +923,8 @@ function wireEra() {
   };
   wrap.addEventListener("pointerdown", prefer);
   wrap.addEventListener("touchstart", prefer, { passive: true });
-  eraFill();
+  addEventListener("resize", eraBubbles);
+  eraVisual();
 }
 
 /* ------------------------------------------------------------ correlations (client-side) */
@@ -1219,7 +1262,7 @@ function wireUI() {
   $("#btn-reset").onclick = () => {
     st.enabled = new Set(TYPES.filter(t => t.id !== "mass").map(t => t.id)); st.community_on = true; st.m411 = false; $("#m411-toggle").checked = false; st.outcomes = new Set(["a", "d", "n", "u"]); st.q = ""; $("#q").value = ""; st.undated = true; $("#chk-undated").checked = true;
     [["cred-range", 0, 100], ["uq-range", 0, 100], ["date-range", 1000, 2026]].forEach(([id, a, b]) => { const [x, y] = $$(`#${id} input`); x.value = a; y.value = b; x.oninput(); });
-    const ea = $("#era-start"), eb = $("#era-end"); if (ea && eb) { ea.value = st.eraMin || ea.min; eb.value = 2026; st.era = [+ea.value, +eb.value]; $("#era-from").textContent = ea.value; $("#era-to").textContent = eb.value; eraFill(); }
+    const ea = $("#era-start"), eb = $("#era-end"); if (ea && eb) { ea.value = st.eraMin || ea.min; eb.value = 2026; st.era = [+ea.value, +eb.value]; eraVisual(); }
   };
   $("#btn-connections").onclick = () => { st.connections = !st.connections; syncConnBtn(); renderWaves(); renderTheories(); renderArcs(); toast(st.connections ? "Connections on: report waves (yellow rings), curated links and community theories" : "Connections off"); };
   $("#btn-add").onclick = startAddMode;
